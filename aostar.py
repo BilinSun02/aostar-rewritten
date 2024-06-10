@@ -1,5 +1,7 @@
 from typing import Optional, List
 from dataclasses import dataclass
+from heapq import heapify
+from prompt_gpt import prompt_for_tactics, prompt_for_triviality
 
 @dataclass
 class Node:
@@ -13,6 +15,7 @@ class Node:
     def __post_init__(self):
         if  self.nodetype == "OR":
             self.estimation = heuristic(self)
+        heapify(self.children) # Always safe: heapify is idempotent
 
     def __lt__(self, other):
         # For heapq
@@ -45,7 +48,7 @@ def expand(node):
     node.nodetype = "OR"
 
     # Placeholder for prompting the LLM to check if the node is trivially solvable
-    is_trivially_solvable = False  # Replace with actual LLM check
+    is_trivially_solvable = prompt_for_triviality(node.obligation)
     if is_trivially_solvable:
         node.solved = True
         node.estimation = 0
@@ -75,7 +78,11 @@ def find(node):
         find(best_child)
 
 def ao_star(task):
-    root = Node()
-    init_node(root, parent=None, nodetype="OR", obligation=task)
+    root = init_node(parent=None, nodetype="OR", obligation=task)
     while not root.solved:
         find(root)
+
+if __name__ == "__main__":
+    # Test driving code
+    task = "a"
+    ao_star(task)
