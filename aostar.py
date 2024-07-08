@@ -1,23 +1,23 @@
 from typing import Optional, List
-from dataclasses import dataclass
-from heapq import heapify
+from dataclasses import dataclass, field
+from heapq import heapify, heappop
 from prompt_gpt import prompt_for_tactics, prompt_for_triviality
 
 @dataclass
 class Node:
-    parent: Optional['Node'] = None
-    nodetype: Optional[str]
-    obligation: Optional[str]
-    estimation: Optional[float]
-    children: List['Node']
+    parent: 'Node'
+    nodetype: str
+    obligation: str
+    estimation: float
+    children: List['Node'] | None
     solved: bool = False
     
     def __post_init__(self):
-        if  self.nodetype == "OR":
-            self.estimation = heuristic(self)
-        heapify(self.children) # Always safe: heapify is idempotent
+        self.unsolved_children = self.children.copy()
+        heapify(self.unsolved_children) # Always safe: heapify is idempotent
+        #print(f"heapifying unsolved children for node with {self.obligation=}")
 
-    def __lt__(self, other):
+    def __lt__(self, other: 'Node'):
         # For heapq
         return self.estimation < other.estimation
 
@@ -25,12 +25,15 @@ def heuristic(node: Node) -> Node:
     return 1
 
 def init_node(parent: Node, nodetype: Optional[str], obligation: Optional[str]) -> Node:
-    node = Node(parent=parent, nodetype=nodetype, obligation=obligation)
+    node = Node(parent=parent, nodetype=nodetype, obligation=obligation, estimation=heuristic(obligation), children=[], solved=False)
     if parent is not None:
         parent.children.append(node)
     return node
 
-def backtrack(node: Node) -> Node:
+def backtrack(node: Node) -> None:
+    """
+    Recursively notify parents of updated children.
+    """
     assert node.children, "Backtracking on a node without children"
     # The following code assumes children is non-empty.
     # For our implementation we don't need to backtrack on leaf nodes anyways.
@@ -43,7 +46,10 @@ def backtrack(node: Node) -> Node:
     if node.parent is not None:
         backtrack(node.parent)
 
-def expand(node):
+def expand(node) -> None:
+    """
+    "Work" on the current node.
+    """
     assert not node.children, "Expanding a non-leaf node"
     node.nodetype = "OR"
 
@@ -52,29 +58,23 @@ def expand(node):
     if is_trivially_solvable:
         node.solved = True
         node.estimation = 0
-        if node.parent is not None:
+        if node.parent:
             backtrack(node.parent)
     else:
         # Placeholder for prompting the LLM and obtaining tactics
-        tactics = []  # Replace with actual LLM generation of tactics
+        tactics = prompt_for_tactics(node.obligation)  # Replace with actual LLM generation of tactics
         for tactic in tactics:
-            and_node = Node()
-            init_node(and_node, parent=node, nodetype="AND", obligation=tactic)
+            and_node = init_node(parent=node, nodetype="AND", obligation=', and'.join(tactic))
             for obligation in tactic:
-                or_node = Node()
-                init_node(or_node, parent=and_node, nodetype="OR", obligation=obligation)
+                init_node(parent=and_node, nodetype="OR", obligation=obligation)
         backtrack(node)
 
 def find(node):
     if not node.children:
         expand(node)
     else:
-        best_child = None
-        best_estimate = float('inf')
-        for child in node.children:
-            if child.estimation < best_estimate:
-                best_child = child
-                best_estimate = child.estimation
+        print(f"looking into unsolved children for node with {node.obligation=}")
+        best_child = heappop(node.unsolved_children)
         find(best_child)
 
 def ao_star(task):
@@ -84,5 +84,5 @@ def ao_star(task):
 
 if __name__ == "__main__":
     # Test driving code
-    task = "a"
+    task = "[root]"
     ao_star(task)
