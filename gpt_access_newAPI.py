@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Uses deprecated OpenAI <1.0.0 APIs
 
 import sys
 root_dir = f"{__file__.split('gpt_access')[0]}"
@@ -62,7 +61,11 @@ class GptAccess(object):
         assert os.path.exists(secret_filepath), "Secret filepath does not exist"
         self.secret_filepath = secret_filepath
         self._load_secret()
-        self.models_supported = openai.Model.list().data
+        self.client = openai.Client(
+            api_key = self.secret["api_key"]
+            #organization = self.secret["organization"]
+        )
+        self.models_supported = self.client.models.list()
         self.models_supported_name = [model.id for model in self.models_supported]
         if model_name is not None:
             assert model_name in self.models_supported_name, f"Model name {model_name} not supported"
@@ -90,7 +93,7 @@ class GptAccess(object):
         stop: list = ["\n"],
         logprobs: int = 0) -> typing.List[typing.Tuple[str, float]]:
         model = self.model_name if model is None else model
-        response = openai.Completion.create(
+        response = self.client.completions.create(
             model=model,
             prompt=prompt,
             max_tokens=max_tokens,
@@ -136,7 +139,7 @@ class GptAccess(object):
             # logger.info(f"using top-p: {top_p}")
 
             # print("using temporary messages for multiple responses: ", messages_temp)
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=model,
                 messages=messages_temp,
                 # messages=messages,
@@ -153,7 +156,7 @@ class GptAccess(object):
             self.usage["completion_tokens"] += usage.completion_tokens
             self.usage["total_tokens"] += usage.total_tokens
         else:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=model,
                 messages=messages,
                 max_tokens=max_tokens,
@@ -223,9 +226,7 @@ class GptAccess(object):
 
     def _load_secret(self) -> None:
         with open(self.secret_filepath, "r") as f:
-            secret = json.load(f)
-            # openai.organization = secret["organization"]
-            openai.api_key = secret["api_key"]
+            self.secret = json.load(f)
         pass
 
     def get_usage(self) -> dict:

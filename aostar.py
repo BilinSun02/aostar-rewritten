@@ -1,7 +1,8 @@
 from typing import Optional, List
 from dataclasses import dataclass, field
 from heapq import heapify, heappop
-from prompt_gpt import prompt_for_tactics, prompt_for_triviality
+#from prompt_gpt import prompt_for_tactics, prompt_for_triviality
+from prompt_human import prompt_for_tactics, prompt_for_triviality
 
 @dataclass
 class Node:

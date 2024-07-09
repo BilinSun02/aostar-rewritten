@@ -1,22 +1,6 @@
 from gpt_access import GptAccess
 
-def get_yes_no(prompt):
-    while True:
-        response = input(prompt).strip().lower()
-        if response in ['y', 'yes']:
-            return True
-        elif response in ['n', 'no']:
-            return False
-        else:
-            print("Please enter 'y' or 'yes' for yes, 'n' or 'no' for no.")
-
-def prompt_for_triviality(obligation: str):
-    # Dummy code for now
-    openai_access = GptAccess(model_name="gpt-3.5-turbo")
-    # openai_access = GptAccess(model_name="gpt-4")
-    # openai_access = GptAccess(model_name="davinci")
-    # print(openai_access.get_models())
-    messages = [
+template_message = [
         {
             "role": "system",
             "content": \
@@ -50,14 +34,74 @@ You can refer to the example conversation to understand the response format bett
             'role': 'user',
             'content': \
 """
-Goals to prove:\n[GOALS]\n[GOAL] 1\nx % 2 = 0 → x * x % 2 = 0\n[HYPOTHESES] 1\n[HYPOTHESIS] x : ℕ\n\n[INFORMAL-THEOREM]\ntheorem mod_arith_1\n(x : ℕ) : x % 2 = 0 → (x * x) % 2 = 0 :=\n\n[INFORMAL-PROOF]\nTo prove this theorem, we will use the property that if x is even, then x * x is also even. An even number is defined as a number that is divisible by 2, which means it can be expressed as 2 * k for some integer k. The statement x % 2 = 0 asserts that x is even.\n\nLet's proceed with the proof in Lean:\n\n
-        lean\ntheorem mod_arith_1 (x : ℕ) : x % 2 = 0 → (x * x) % 2 = 0 :=\nbegin\n  -- Assume x is even, i.e., x % 2 = 0\n  intro h,\n  -- Since x is even, there exists some k such that x = 2 * k\n  have k_def : ∃ k, x = 2 * k := exists_eq_mul_right_of_dvd (nat.dvd_of_mod_eq_zero h),\n  -- Let's use this k to express x\n  cases k_def with k hk,\n  -- Now we rewrite x as 2 * k and expand (2 * k) * (2 * k)\n  rw hk,\n  -- After expansion, we get 4 * k * k\n  calc (2 * k) * (2 * k) = 4 * (k * k) : by ring\n  ... = 2 * (2 * (k * k)) : by rw ←mul_assoc\n  -- The result is clearly a multiple of 2, hence it is even\n  ... % 2 = 0 : by rw nat.mul_mod_right\nend\n
-        \n\nIn this proof, we first introduce our assumption that x is even. Then we express x as 2 * k for some k using the fact that x is divisible by 2. We then rewrite x in terms of k and expand the expression (2 * k) * (2 * k) to 4 * k * k, which is clearly a multiple of 2. Finally, we conclude that (x * x) % 2 = 0, which completes the proof.\n[THEOREMS] 1\n[THEOREM] complex.sin_two_pi :  sin (2 * π) = 0\n[THEOREM] nat.digits_aux_zero : (b : ℕ) (h : 2 ≤ b) : digits_aux b h 0 = []\n[THEOREM] int.mod_two_ne_one :  ¬ n % 2 = 1 ↔ n % 2 = 0\n[THEOREM] int.mod_two_ne_zero :  ¬ n % 2 = 0 ↔ n % 2 = 1\n[THEOREM] nat.mod_two_ne_one :  ¬ n % 2 = 1 ↔ n % 2 = 0\n[THEOREM] nat.mod_two_ne_zero :  ¬ n % 2 = 0 ↔ n % 2 = 1\n[THEOREM] nat.eq_zero_of_mul_eq_zero :  ∀ {n m : ℕ}, n * m = 0 → n = 0 ∨ m = 0 | 0        m\n[END]\n[FOCUSED GOAL]: hypotheses: x : ℕgoal: x % 2 = 0 → x * x % 2 = 0\n[EXPAND NUM]: 5
+Goals to prove:
+[GOALS]
+[GOAL] 1
+x % 2 = 0 → x * x % 2 = 0
+[HYPOTHESES] 1
+[HYPOTHESIS] x : ℕ
+
+[INFORMAL-THEOREM]
+theorem mod_arith_1
+(x : ℕ) : x % 2 = 0 → (x * x) % 2 = 0 :=
+
+[INFORMAL-PROOF]
+To prove this theorem, we will use the property that if x is even, then x * x is also even. An even number is defined as a number that is divisible by 2, which means it can be expressed as 2 * k for some integer k. The statement x % 2 = 0 asserts that x is even.
+
+Let's proceed with the proof in Lean:
+```lean
+theorem mod_arith_1 (x : ℕ) : x % 2 = 0 → (x * x) % 2 = 0 :=
+begin
+  -- Assume x is even, i.e., x % 2 = 0
+  intro h,
+  -- Since x is even, there exists some k such that x = 2 * k
+  have k_def : ∃ k, x = 2 * k := exists_eq_mul_right_of_dvd (nat.dvd_of_mod_eq_zero h),
+  -- Let's use this k to express x
+  cases k_def with k hk,
+  -- Now we rewrite x as 2 * k and expand (2 * k) * (2 * k)
+  rw hk,
+  -- After expansion, we get 4 * k * k
+  calc (2 * k) * (2 * k) = 4 * (k * k) : by ring
+  ... = 2 * (2 * (k * k)) : by rw ←mul_assoc
+  -- The result is clearly a multiple of 2, hence it is even
+  ... % 2 = 0 : by rw nat.mul_mod_right
+end
+```
+In this proof, we first introduce our assumption that x is even. Then we express x as 2 * k for some k using the fact that x is divisible by 2. We then rewrite x in terms of k and expand the expression (2 * k) * (2 * k) to 4 * k * k, which is clearly a multiple of 2. Finally, we conclude that (x * x) % 2 = 0, which completes the proof.
+
+[THEOREMS] 1
+[THEOREM] complex.sin_two_pi :  sin (2 * π) = 0
+[THEOREM] nat.digits_aux_zero : (b : ℕ) (h : 2 ≤ b) : digits_aux b h 0 = []
+[THEOREM] int.mod_two_ne_one :  ¬ n % 2 = 1 ↔ n % 2 = 0
+[THEOREM] int.mod_two_ne_zero :  ¬ n % 2 = 0 ↔ n % 2 = 1
+[THEOREM] nat.mod_two_ne_one :  ¬ n % 2 = 1 ↔ n % 2 = 0
+[THEOREM] nat.mod_two_ne_zero :  ¬ n % 2 = 0 ↔ n % 2 = 1
+[THEOREM] nat.eq_zero_of_mul_eq_zero :  ∀ {n m : ℕ}, n * m = 0 → n = 0 ∨ m = 0 | 0        m
+[END]
+[FOCUSED GOAL]: hypotheses: x : ℕ goal: x % 2 = 0 → x * x % 2 = 0
+[EXPAND NUM]: 5
 """
         },
     ]
+
+def get_yes_no(prompt):
+    while True:
+        response = input(prompt).strip().lower()
+        if response in ['y', 'yes']:
+            return True
+        elif response in ['n', 'no']:
+            return False
+        else:
+            print("Please enter 'y' or 'yes' for yes, 'n' or 'no' for no.")
+
+def prompt_for_triviality(obligation: str):
+    # Dummy code for now
+    openai_access = GptAccess(model_name="gpt-3.5-turbo")
+    # openai_access = GptAccess(model_name="gpt-4")
+    # openai_access = GptAccess(model_name="davinci")
+    # print(openai_access.get_models())
     print("printing complete chat:")
-    print(openai_access.complete_chat(messages, max_tokens=15, n=2, temperature=0.8))
+    print(openai_access.complete_chat(template_message, max_tokens=15, n=2, temperature=0.8))
     return get_yes_no(f"Should the tactic for {obligation=} be trivial? (y/n): ")
 
 def prompt_for_tactics(obligation: str):
