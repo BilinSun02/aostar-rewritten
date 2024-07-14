@@ -7,6 +7,14 @@ begin
   sorry
 end
 
+variables x y z : ℕ
+variables H₀ : x ≤ y 
+variables H₁ : y ≤ z 
+#check trans
+#check (trans H₀)
+#check (trans H₀ H₁)
+
+/-
 theorem inequality_chain
 (a b c d: ℕ) : a ≤ b → b ≤ c → c ≤ d → a ≤ d :=
 begin
@@ -14,6 +22,30 @@ begin
   intro h₁,
   intro h₂,
   apply trans,
+end
+-/
+
+theorem inequality_chain
+(a b c d: ℕ) (h₀ : a ≤ b) (h₁ : b ≤ c) (h₂ : c ≤ d) : a ≤ d :=
+begin
+  apply trans,
+  --apply h₀,
+  --apply trans,
+  --apply h₁,
+  --exact h₂
+end
+
+theorem inequality_chain
+(a b c d: ℕ) (h₀ : a ≤ b) (h₁ : b ≤ c) (h₂ : c ≤ d) : a ≤ d :=
+begin
+  apply trans h₀,
+  apply trans h₁,
+  apply trans h₂,
+  apply refl
+  --apply h₀,
+  --apply trans,
+  --apply h₁,
+  --exact h₂
 end
 
 /-

@@ -314,90 +314,6 @@ class Lean3Executor(object):
             except StopIteration:
                 return False
     
-    def rewind_proof_steps(self) -> str:
-        raise NotImplementedError("rewind_proof_steps is not implemented")
-
-    def run_till_next_lemma(self) -> typing.Tuple[bool, typing.Optional[str]]:
-        # Run the coq file until the next lemma is found
-        next_stmt = None
-        in_proof_mode = self.is_in_proof_mode()
-        if in_proof_mode or self.execution_complete:
-            # If we are already in proof mode, then we have already found a lemma
-            return False, next_stmt
-        prev_stmt = self.current_stmt
-        ran_last_cmd = self.run_next()
-        next_stmt = self.current_stmt
-        if not ran_last_cmd:
-            return False, None
-        assigned = False
-        while ran_last_cmd and not in_proof_mode:
-            if not assigned:
-                prev_stmt = next_stmt
-            ran_last_cmd = self.run_next()
-            in_proof_mode = self.is_in_proof_mode()
-            if not assigned:
-                next_stmt = self.current_stmt
-                if in_proof_mode:
-                    assigned = True
-        lemma_name = next_stmt if next_stmt.startswith("Theorem") or next_stmt.startswith("Lemma") else prev_stmt
-        return in_proof_mode, lemma_name
-
-    def run_till_next_lemma_return_exec_stmt(self) -> typing.Generator[str, None, None]:
-        # Run the coq file until the next lemma is found
-        next_stmt = None
-        in_proof_mode = self.is_in_proof_mode()
-        if in_proof_mode or self.execution_complete:
-            # If we are already in proof mode, then we have already found a lemma
-            yield from []
-        else:
-            ran_last_cmd = self.run_next()
-            next_stmt = self.current_stmt
-            if not ran_last_cmd:
-                yield from []
-            else:
-                yield next_stmt
-            while ran_last_cmd and not in_proof_mode:
-                ran_last_cmd = self.run_next()
-                next_stmt = self.current_stmt
-                if ran_last_cmd:
-                    yield next_stmt
-                in_proof_mode = self.is_in_proof_mode()
-
-    def run_to_finish_lemma_return_exec(self) -> typing.Generator[str, None, None]:
-        # Run the coq file until the next lemma is found
-        next_stmt = None
-        in_proof_mode = self.is_in_proof_mode()
-        if not in_proof_mode or self.execution_complete:
-            # If we are already in proof mode, then we have already found a lemma
-            yield from []
-        else:
-            ran_last_cmd = self.run_next()
-            next_stmt = self.current_stmt
-            if not ran_last_cmd:
-                yield from []
-            else:
-                yield next_stmt
-            while ran_last_cmd and in_proof_mode:
-                ran_last_cmd = self.run_next()
-                next_stmt = self.current_stmt
-                if ran_last_cmd:
-                    yield next_stmt
-                in_proof_mode = self.is_in_proof_mode()
-
-    def run_to_finish_lemma(self) -> bool:
-        # Run the coq file and finish the current lemma
-        in_proof_mode = self.is_in_proof_mode()
-        if not in_proof_mode or self.execution_complete:
-            # If we are not in proof mode, then we are not finishing a lemma
-            return False
-        ran_last_cmd = self.run_next()
-        if not ran_last_cmd:
-            return False
-        while ran_last_cmd and in_proof_mode:
-            ran_last_cmd = self.run_next()
-            in_proof_mode = self.is_in_proof_mode()
-        return not in_proof_mode
-
     def run_till_line_num(self, line_num: int):
         assert line_num >= self.line_num
         ran_last_cmd = True
@@ -410,30 +326,6 @@ class Lean3Executor(object):
         while ran_last_cmd:
             ran_last_cmd = self.run_next()
         
-    def get_lemma_name_if_running(self) -> typing.Optional[str]:
-        if not self.is_in_proof_mode():
-            return None
-        else:
-            try:
-                return self.curr_lemma_name
-            except:
-                return None
-    
-    def get_lemma_stmt_if_running(self) -> typing.Optional[str]:
-        if not self.is_in_proof_mode():
-            return None
-        else:
-            try:
-                return self.local_theorem_lemma_description[self.curr_lemma_name]
-            except:
-                return None
-        
-    def get_current_lemma_name(self) -> typing.Optional[str]:
-        if self.curr_lemma_name is None:
-            return None
-        else:
-            return self.curr_lemma_name
-
     def _set_content_to_run(self, stmt: str) -> str:
         # Now add this new line to the context
         if len(self._file_content) > 0:
@@ -449,7 +341,7 @@ class Lean3Executor(object):
         # TODO: This is a hack, since we are not tokenizing if there are variables which have suffix or prefix
         # of begin or end, then this won't be correct. But this is a rare case, so we can ignore it for now
         if not file_content.endswith("end"):
-            return False # no need to check if we are no where near a closing of a proof
+            return False # no need to check if we are nowhere near a closing of a proof
         return file_content.count("begin") == file_content.count("end")
 
     def _run_stmt_on_lean_server(self, idx : int, stmt: str):
@@ -542,71 +434,6 @@ class Lean3Executor(object):
                 self.lean_error_messages = ["The tactic timed out, probably because of repeated application of a tactic which created a very big goal."]
                 pass
         pass
-
-    def _skip_to_theorem(self, theorem: str):
-        found_thm = False
-        while not found_thm:
-            try:
-                stmt = next(self.main_file_iter)
-            except StopIteration:
-                if not self.suppress_error_log:
-                    logger.error(f"Could not find theorem '{theorem}' in the file '{self.main_file}'")
-                    raise Exception(f"Could not find theorem '{theorem}' in the file '{self.main_file}'")
-                return
-            self.current_stmt = stmt
-            self.line_num += 1
-            file_content = self._file_content
-            self._lines_executed = file_content.split("\n")
-            idx = len(self._lines_executed)
-            if (stmt.startswith("theorem") or stmt.startswith("lemma")) and self._import_end_idx is None:
-                self._import_end_idx = idx - 1
-            # Now add this new line to the context
-            if len(file_content) > 0:
-                # First create a context of all the lines executed so far
-                file_content += "\n" + stmt.strip()
-            else:
-                file_content = stmt.strip()
-            file_content = Lean3Utils.remove_comments(file_content)
-            last_thm_details = Lean3Executor.theorem_match.findall(file_content)
-            if last_thm_details:
-                # We might have found a new theorem
-                full_thm_stmt, _, _, thm_name, thm_value, _ = last_thm_details[-1]
-                full_thm_stmt = full_thm_stmt.strip()
-                thm_name = thm_name.strip()
-                thm_value = thm_value.strip()
-                thm_value = thm_value.lstrip(":")
-                if thm_name not in self.local_file_lemmas:
-                    if theorem != thm_name:
-                        self.local_theorem_lemma_description[thm_name] = full_thm_stmt
-                        self.local_file_lemmas[thm_name] = thm_value
-                    else:
-                        found_thm = True
-            if found_thm:
-                # Capture the proof context
-                assert self._import_end_idx is not None
-                # Remove all the theorems before the current theorem
-                self._lines_executed = self._lines_executed[:self._import_end_idx + 1]
-                full_thm_stmts = full_thm_stmt.split("\n")
-                self._lines_executed.extend(full_thm_stmts)
-                # Reset the file content to completely ignore the previous theorems
-                self._file_content = '\n'.join(self._lines_executed)
-                # Now change the idx
-                idx = len(self._lines_executed)
-                self.line_num = idx
-                # Remove all the theorems discovered before the current theorem
-                self.local_file_lemmas.clear()
-                self.local_theorem_lemma_description.clear()
-                self._run_stmt_on_lean_server(idx, stmt)
-                self._lines_executed.append(stmt)
-                self.line_num += 1 # This needs to be reset because the begin was ignored
-            else:
-                # Now run the lines till the theorem is found
-                self._set_content_to_run(stmt)
-                self._lines_executed.append(stmt)
-        pass
-    
-    def get_all_theorems(self) -> typing.List[str]:
-        self.run_without_executing()
 
     def _parse_proof_context(self, proof_context_str: str) -> ProofContext:
         if self.use_human_readable_proof_context:
@@ -753,8 +580,11 @@ class LeanCustomFileExec:
                     break
                 # print(f"{self.lean_exec.proof_context}")
                 print("In> ", end="")
-            except:
-                pass
+            except KeyboardInterrupt:
+                print("\nInterrupted by user")
+                break
+            except BaseException as e:
+                print(f"{type(e).__name__} happened: {repr(e)}")
             pass    
 
 if __name__ == "__main__":
