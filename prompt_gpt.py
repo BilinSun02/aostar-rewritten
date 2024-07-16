@@ -72,7 +72,7 @@ In this proof, we first introduce our assumption that x is even. Then we express
 [THEOREM] nat.mod_two_ne_zero :  ¬ n % 2 = 0 ↔ n % 2 = 1
 [THEOREM] nat.eq_zero_of_mul_eq_zero :  ∀ {n m : ℕ}, n * m = 0 → n = 0 ∨ m = 0 | 0        m
 [END]
-[FOCUSED GOAL]: hypotheses: x : ℕ goal: x % 2 = 0 → x * x % 2 = 0
+[FOCUSED GOAL]: hypotheses: x : ℕ goal: x % 2 = 0 → (x * x * x) % 2 = 0
 [EXPAND NUM]: 5
 """
         },
