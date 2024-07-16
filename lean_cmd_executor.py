@@ -18,6 +18,7 @@ from collections import OrderedDict
 from lean_parse_utils import LeanLineByLineReader
 from lean_cmd_server import LeanCmdServer
 from lean_utils import Lean3Utils
+from user_controlled_exceptions import user_controls_exceptions_of
 logger = logging.getLogger()
 
 class Obligation(typing.NamedTuple):
@@ -536,6 +537,7 @@ class LeanCustomFileExec:
     def __exit__(self, exc_type, exc_value, traceback):
         self.lean_exec.__exit__(exc_type, exc_value, traceback)
     
+    @user_controls_exceptions_of(suppress_warning=True)
     def run_in_loop(self, opt: str = None):
         print("In> Press 'Enter' for running next line, \n" + 
               "'c' + 'Enter' to cancel the last command and 're-run', \n" +
@@ -583,8 +585,9 @@ class LeanCustomFileExec:
             except KeyboardInterrupt:
                 print("\nInterrupted by user")
                 break
-            except BaseException as e:
-                print(f"{type(e).__name__} happened: {repr(e)}")
+            #except BaseException as e:
+            #    pass
+            # All exceptions other than KeyboardInterrupt shall be treated by @user_controls_exceptions_of
             pass    
 
 if __name__ == "__main__":
@@ -593,4 +596,7 @@ if __name__ == "__main__":
     project = "data/test/lean_proj"
     file = "data/test/lean_proj/src/simple.lean"
     with LeanCustomFileExec(file, project) as lean_exec:
+        import inspect
+        print(inspect.signature(LeanCustomFileExec.run_in_loop))
+        print(type(LeanCustomFileExec.run_in_loop))
         lean_exec.run_in_loop()
