@@ -54,14 +54,18 @@ as in
 theorem trans (a b c : ℕ) (h₀: a ≤ b) (h₁: b ≤ c) : a ≤ c
 ```
 
-Pedantically, a *hypothesis* is an "argument" `p` to the an implication, itself a proposition
+Pedantically, a *hypothesis* is a proof $p$ to the premise $P$ of an implication-styled proposition $P\rightarrow Q$; interpreted the other way, an argument `p` to the parameter `P` in a function prototype `P→Q`.
 
 
-## And–or tree
+## and–or tree
 https://en.wikipedia.org/wiki/And%E2%80%93or_tree
+See `aostar.md` for more details on how our and-or tree is implemented.
+
 
 ## AND nodes
-TODO: type up the definition in our context of proof searching
+In an and-or tree, a node that's not solved until *all* children are solved.
+See `aostar.md` for more details on how our and-or tree is implemented.
 
 ## OR nodes
-TODO: type up the definition in our context of proof searching
+In an and-or tree, a node that's solved when *any* child is solved.
+See `aostar.md` for more details on how our and-or tree is implemented.

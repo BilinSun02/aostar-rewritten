@@ -1,3 +1,6 @@
 .secrets
 .lean3.swp
 __pycache__
+leanpkg.path
+temp_*
+*.log

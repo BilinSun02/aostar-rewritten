@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Uses deprecated OpenAI <1.0.0 APIs
+# Adopted from the copra codebase
 
 import sys
 root_dir = f"{__file__.split('gpt_access')[0]}"
@@ -204,7 +205,7 @@ class GptAccess(object):
         elif "gpt-3.5-turbo" in model:
             #print("Warning: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
             return self.num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613")
-        elif "gpt-4" in model:
+        elif "gpt-4" in model: #TODO: is this true of gpt-4o?
             #print("Warning: gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
             return self.num_tokens_from_messages(messages, model="gpt-4-0613")
         else:

@@ -1,3 +1,4 @@
+# TODO: needs refactorization updating the procotols to match those used by prompt_gpt
 def get_yes_no(prompt):
     while True:
         response = input(prompt).strip().lower()

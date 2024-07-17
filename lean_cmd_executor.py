@@ -23,7 +23,7 @@ logger = logging.getLogger()
 
 class Obligation(typing.NamedTuple):
     hypotheses: typing.List[str]
-    goal: str
+    goal: str #TODO: this "goal" is defined very differently from what I intend "goal" to mean. I'll change the names later.
 
     @classmethod
     def from_dict(cls, data):
@@ -32,7 +32,12 @@ class Obligation(typing.NamedTuple):
     def to_dict(self) -> typing.Dict[str, typing.Any]:
         return {"hypotheses": self.hypotheses,
                 "goal": self.goal}
-
+    
+    def format_message(self, goal_idx: int) -> str:
+        message_str = f"[GOAL] {goal_idx}\n" + self.goal + "\n[HYPOTHESES]\n"
+        for hypothesis in self.hypotheses:
+            message_str += "[HYPOTHESIS] " + hypothesis
+        return message_str
 
 class ProofContext(typing.NamedTuple):
     fg_goals: typing.List[Obligation]

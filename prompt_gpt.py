@@ -1,6 +1,8 @@
+from typing import List
 from gpt_access import GptAccess
+import copy
 
-template_message = [
+template_messages = [
         {
             "role": "system",
             "content": \
@@ -28,85 +30,52 @@ Please take a note of the following:
             'role': 'user',
             'content': \
 """
-Goals to prove:
-[GOALS]
-[GOAL] 1
-x % 2 = 0 → x * x % 2 = 0
-[HYPOTHESES]
-[HYPOTHESIS] x : ℕ
-
-[INFORMAL-THEOREM]
-theorem mod_arith_1
-(x : ℕ) : x % 2 = 0 → (x * x) % 2 = 0 :=
-
-[INFORMAL-PROOF]
-To prove this theorem, we will use the property that if x is even, then x * x is also even. An even number is defined as a number that is divisible by 2, which means it can be expressed as 2 * k for some integer k. The statement x % 2 = 0 asserts that x is even.
-
-Let's proceed with the proof in Lean:
-```lean
-theorem mod_arith_1 (x : ℕ) : x % 2 = 0 → (x * x) % 2 = 0 :=
-begin
-  -- Assume x is even, i.e., x % 2 = 0
-  intro h,
-  -- Since x is even, there exists some k such that x = 2 * k
-  have k_def : ∃ k, x = 2 * k := exists_eq_mul_right_of_dvd (nat.dvd_of_mod_eq_zero h),
-  -- Let's use this k to express x
-  cases k_def with k hk,
-  -- Now we rewrite x as 2 * k and expand (2 * k) * (2 * k)
-  rw hk,
-  -- After expansion, we get 4 * k * k
-  calc (2 * k) * (2 * k) = 4 * (k * k) : by ring
-  ... = 2 * (2 * (k * k)) : by rw ←mul_assoc
-  -- The result is clearly a multiple of 2, hence it is even
-  ... % 2 = 0 : by rw nat.mul_mod_right
-end
-```
-In this proof, we first introduce our assumption that x is even. Then we express x as 2 * k for some k using the fact that x is divisible by 2. We then rewrite x in terms of k and expand the expression (2 * k) * (2 * k) to 4 * k * k, which is clearly a multiple of 2. Finally, we conclude that (x * x) % 2 = 0, which completes the proof.
-
-[THEOREMS] 1
-[THEOREM] complex.sin_two_pi :  sin (2 * π) = 0
-[THEOREM] nat.digits_aux_zero : (b : ℕ) (h : 2 ≤ b) : digits_aux b h 0 = []
-[THEOREM] int.mod_two_ne_one :  ¬ n % 2 = 1 ↔ n % 2 = 0
-[THEOREM] int.mod_two_ne_zero :  ¬ n % 2 = 0 ↔ n % 2 = 1
-[THEOREM] nat.mod_two_ne_one :  ¬ n % 2 = 1 ↔ n % 2 = 0
-[THEOREM] nat.mod_two_ne_zero :  ¬ n % 2 = 0 ↔ n % 2 = 1
-[THEOREM] nat.eq_zero_of_mul_eq_zero :  ∀ {n m : ℕ}, n * m = 0 → n = 0 ∨ m = 0 | 0        m
-[END]
-[FOCUSED GOAL]: hypotheses: x : ℕ goal: x % 2 = 0 → (x * x * x) % 2 = 0
-[EXPAND NUM]: 5
 """
         },
     ]
 
-def get_yes_no(prompt):
-    while True:
-        response = input(prompt).strip().lower()
-        if response in ['y', 'yes']:
-            return True
-        elif response in ['n', 'no']:
-            return False
-        else:
-            print("Please enter 'y' or 'yes' for yes, 'n' or 'no' for no.")
+def remove_end_line(string_list:List[str], indent_amount:int=4) -> List[str]:
+    result = []
+    for string in string_list:
+        lines = string.split('\n')
+        purged_lines = [line for line in lines if not line.strip() == "end"]
+        purged_string = '\n'.join(purged_lines)
+        result.append(purged_string)
+    return result
 
-def prompt_for_triviality(obligation: str):
-    # Dummy code for now
-    openai_access = GptAccess(model_name="gpt-3.5-turbo")
-    # openai_access = GptAccess(model_name="gpt-4")
-    # openai_access = GptAccess(model_name="davinci")
-    # print(openai_access.get_models())
-    print("printing complete chat:")
-    print(openai_access.complete_chat(template_message, max_tokens=15, n=2, temperature=0.8))
-    return get_yes_no(f"Should the tactic for {obligation=} be trivial? (y/n): ")
+def prompt_for_tactics(message: str) -> List[str]:
+    if not hasattr(prompt_for_tactics, 'gpt_access_counter'):
+        prompt_for_tactics.gpt_access_counter = 0
+    prompt_for_tactics.gpt_access_counter += 1
+    if prompt_for_tactics.gpt_access_counter >= 100:
+        raise RuntimeError("LLM prompted over 100 times. Terminating the program so that bugs like infinite loops won't cost too much.")
+    #openai_access = GptAccess(model_name="gpt-3.5-turbo")
+    openai_access = GptAccess(model_name="gpt-4o")
+    messages = copy.deepcopy(template_messages)
+    messages[1]["content"] = message
+    gpt_tactics = []
 
-def prompt_for_tactics(obligation: str):
-    # Dummy code for now
-    tactics = []
-    print(f"Enter the tactics for {obligation=}: ")
-    while True:
-        one_tactic = input(">")
-        if one_tactic:
-            tactics.append(one_tactic)
-        else:
-            break
-    # Separate 
-    return tactics
+    gpt_response = openai_access.complete_chat(messages, max_tokens=200, n=2, temperature=0)
+    """
+    A typical GPT response looks like this. This explains why we need to take gpt_response[0] below,
+    and why we need to put a loop on gpt_message[0] (namely, the list may not be a singleton):
+    ([{'role': 'assistant', 'content': '...', 'finish_reason': 'stop'}, {'role': 'assistant', 'content': '...', 'finish_reason': 'stop'}], {'prompt_tokens': 1980, 'completion_tokens': 139, 'total_tokens': 2119, 'reason': 'stop'})
+    """
+    for gpt_message in gpt_response[0]:
+        gpt_message_str = gpt_message['content']
+        # Split the string by the "[RUN TACTIC]" delimiter
+        gpt_message_lines = gpt_message_str.split("[RUN TACTIC]")
+        for msg in gpt_message_lines:
+            if msg: # There'd be an empty one which is fine
+                msg = msg.rstrip()
+                assert msg[-5:] == "[END]", f"The LLM doesn't seem to be following the requirement that each [RUN TACTIC] should be ended by an [END]. The offending entry is {msg}"
+                msg = msg[:-5]
+                gpt_tactics.append(msg)
+
+    # Sometimes GPT thinks it's done and puts `end`
+    # However, that would break our program. TODO: explain(?)
+    gpt_tactics = remove_end_line(gpt_tactics)
+    #print(f"{gpt_response[0]=}")
+    #print(f"{gpt_tactics=}")
+
+    return gpt_tactics
