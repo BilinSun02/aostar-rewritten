@@ -4,3 +4,4 @@ __pycache__
 leanpkg.path
 temp_*
 logs
+outputs

@@ -1,0 +1,62 @@
+name: miniF2F_test_subset
+num_files: 1
+language: LEAN
+few_shot_data_path_for_retrieval:
+few_shot_metadata_filename_for_retrieval:
+dfs_data_path_for_retrieval:
+dfs_metadata_filename_for_retrieval:
+datasets:
+  - project: data/benchmarks/miniF2F
+    files:
+      - path: lean/src/test.lean
+        theorems:
+        - aime_1983_p1
+        - aime_1983_p3
+        - aime_1984_p7
+        - aime_1988_p8
+        - aime_1999_p11
+        - algebra_absapbon1pabsapbleqsumabsaon1pabsa
+        - algebra_apbon2pownleqapownpbpowon2
+        - algebra_sqineq_at2malt1
+        - algebra_sum1onsqrt2to1onsqrt10000lt198
+        - algebra_2varlineareq_fp3zeq11_3tfm1m5zeqn68_feqn10_zeq7
+        - mathd_algebra_129
+        - mathd_algebra_148
+        - mathd_algebra_209
+        - mathd_algebra_338
+        - mathd_algebra_80
+        - induction_11div10tonmn1ton
+        - induction_12dvd4expnp1p20
+        - induction_1pxpownlt1pnx
+        - induction_nfactltnexpnm1ngt3
+        - induction_pord1p1on2powklt5on2
+        - induction_pprime_pdvdapowpma
+        - induction_prod1p1onk3le3m1onn
+        - induction_sumkexp3eqsumksq
+        - numbertheory_2pownm1prime_nprime
+        - numbertheory_3pow2pownm1mod2pownp3eq2pownp2
+        - numbertheory_4x3m7y3neq2003
+        - numbertheory_aoddbdiv4asqpbsqmod8eq1
+        - numbertheory_exk2powkeqapb2mulbpa2_aeq1
+        - numbertheory_fxeq4powxp6powxp9powx_f2powmdvdf2pown
+        - numbertheory_notequiv2i2jasqbsqdiv8
+        - numbertheory_x5neqy2p4
+        - amc12a_2009_p7
+        - amc12a_2013_p4
+        - amc12a_2019_p12
+        - amc12a_2020_p10
+        - amc12a_2020_p15
+        - amc12a_2020_p25
+        - amc12a_2020_p4
+        - amc12a_2020_p7
+        - amc12a_2020_p9
+        - amc12a_2021_p12
+        - amc12a_2021_p14
+        - amc12a_2021_p18
+        - amc12a_2021_p19
+        - amc12a_2021_p22
+        - imo_1997_p5
+        - imo_1982_p1
+        - imo_1969_p2
+        - imo_2019_p1
+        - imosl_2007_algebra_p6

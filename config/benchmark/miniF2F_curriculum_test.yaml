@@ -1,0 +1,64 @@
+
+name: miniF2F_curriculum_test
+num_files: 1
+language: LEAN
+few_shot_data_path_for_retrieval:
+few_shot_metadata_filename_for_retrieval:
+dfs_data_path_for_retrieval:
+dfs_metadata_filename_for_retrieval:
+datasets:
+  - project: data/benchmarks/miniF2F
+    files:
+      - path: lean/src/aopsbooks.lean 
+      # - path: lean/src/test.lean
+        theorems: 
+          - aopsbook_v1_c7_em3
+          - aopsbook_v1_c6_em3
+          - aopsbook_v1_c28_p516
+          - aopsbook_v2_c13_em5
+          - aopsbook_v1_c29_p567
+          - aopsbook_v2_c14_em2
+          - aopsbook_v2_c8_p132_1
+          - aopsbook_v1_c3_p52
+          - aopsbook_v1_c29_p530
+          - aopsbook_v1_c29_p526
+          - aopsbook_v1_c22_p423
+          - aopsbook_v2_c8_p136
+          - aopsbook_v1_c4_p80
+          - aopsbook_v2_c13_intro3
+          - aopsbook_v1_c29_p571
+          - aopsbook_v2_c8_ex2_4
+          - aopsbook_v1_c7_p151
+          - aopsbook_v1_c28_em5
+          - aopsbook_v1_c6_ex11_2
+          - aopsbook_v2_c13_ex6
+          - aopsbook_v1_c22_p415
+          - aopsbook_v1_c7_p147
+          - aopsbook_v2_c14_p210
+          - aopsbook_v2_c8_em6
+          - aopsbook_v1_c7_intro2
+          - aopsbook_v2_c13_p186
+          - aopsbook_v2_c14_ex1
+          - aopsbook_v2_c13_p190
+          - aopsbook_v2_c13_p201
+          - aopsbook_v2_c13_p200
+          - aopsbook_v1_c6_p137
+          - aopsbook_v1_c6_ex4_1
+          - aopsbook_v1_c4_p62
+          - aopsbook_v2_c13_p191
+          - aopsbook_v2_c8_ex8
+          - aopsbook_v2_c13_p187
+          - aopsbook_v1_c28_p521
+          - aopsbook_v2_c13_ex7
+          - aopsbook_v1_c22_p414
+          - aopsbook_v1_c7_p146
+          - aopsbook_v2_c8_ex3_1
+          - aopsbook_v2_c8_p140
+          - aopsbook_v1_c28_em4
+          - aopsbook_v1_c6_ex7_4
+          - aopsbook_v1_c29_p570
+          - aopsbook_v2_c14_intro1
+          - aopsbook_v2_c13_intro2
+          - aopsbook_v1_c22_p422
+          - aopsbook_v2_c8_p137
+          - aopsbook_v2_c24_em1
