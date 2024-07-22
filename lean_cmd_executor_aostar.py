@@ -22,10 +22,9 @@ class Obligation(typing.NamedTuple):
             message_str += "[HYPOTHESIS] " + hypothesis
         return message_str
 
-def run_proof_on_lean(proof: str, max_memory_in_mib:int=4000, project_root:str="."): # max_memory_in_mib was 40000 in lean_cmd_executor
-    temp_file_name = os.path.join(project_root, "src/temp_proof.lean")
-    #temp_file_name = "data/test/lean_proj2/temp_proof.lean"
-    with open(temp_file_name, "w") as f:
+def run_proof_on_lean(proof: str, project_root:str=".", max_memory_in_mib:int=3000): # max_memory_in_mib was 40000 in lean_cmd_executor
+    temp_file_name = "src/temp_proof.lean"
+    with open(os.path.join(project_root, temp_file_name), "w") as f:
         f.write(proof)
     lean_server = LeanCmdServer(memory_in_mibs=max_memory_in_mib, cwd=project_root, debug=False)
     response = lean_server.run(temp_file_name, 60)

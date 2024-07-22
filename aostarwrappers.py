@@ -8,6 +8,7 @@ import datetime
 import os
 from lean_cmd_executor_aostar import run_proof_on_lean
 import re
+from custom_logger import create_logger
 
 @dataclass
 class AOStarSolver(ABC):
@@ -61,18 +62,16 @@ class AOStarBatchSolver:
 
     def __post_init__(self):
         self.identifier_str = datetime.datetime.now().strftime("%Y-%b-%d-%H-%M-%S")
-        self.main_log_dir = f"logs/run_{self.identifier_str}"
-        os.makedirs(self.main_log_dir, exist_ok=True)
-        self.main_checkpoint_dir = f"checkpoints/run_{self.identifier_str}"
-        os.makedirs(self.main_checkpoint_dir, exist_ok=True)
+        self.output_dir = f"logs/run_{self.identifier_str}"
+        os.makedirs(self.output_dir, exist_ok=True)
 
-        main_log_path = self.main_log_dir + "main.log"
+        self.main_log_file_path = os.path.join(self.output_dir, "main.log")
         self.main_logger = logging.getLogger(__name__)
-        logging.basicConfig(filename=main_log_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
+        logging.basicConfig(filename=self.main_log_file_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
         
         with open(self.lean_file_path, "r") as f:
             self.lean_file_contents = f.read()
-        # Preliminary check that the lean file compiles
+        # Preliminary check that the lean file compiles. This is necessary because
         # self.find_all_theorems will depend on each theorem in the lean file
         # being complete (i.e., having `theorem` (or example), `begin` and `end`)
         _, preliminary_run_messages = run_proof_on_lean(self.lean_file_contents, project_root=project_root, max_memory_in_mib=3000)
@@ -100,25 +99,23 @@ class AOStarBatchSolver:
         for idx, tup in enumerate(self.all_theorems_parsed):
             theorem_statement, theorem_head, _, theorem_name, _, _ = tup
             if theorem_name:
-                log_file_name   = str(idx) + " " + theorem_name + ".log"
-                proof_file_name = str(idx) + " " + theorem_name + ".lean"
-                dump_file_name  = str(idx) + " " + theorem_name + ".pth.tar"
+                log_file_path   = os.path.join(self.output_dir, str(idx) + " " + theorem_name + ".log"    )
+                proof_file_path = os.path.join(self.output_dir, str(idx) + " " + theorem_name + ".lean"   )
+                dump_file_path  = os.path.join(self.output_dir, str(idx) + " " + theorem_name + ".pth.tar")
             else:
-                log_file_name   = str(idx) + ".log"
-                proof_file_name = str(idx) + ".lean"
-                dump_file_name  = str(idx) + ".pth.tar"
-            log_path = os.path.join(self.main_log_dir, log_file_name)
-            logger = logging.getLogger(str(idx))
-            logging.basicConfig(filename=log_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
+                log_file_path   = os.path.join(self.output_dir, str(idx) + ".log"    )
+                proof_file_path = os.path.join(self.output_dir, str(idx) + ".lean"   )
+                dump_file_path  = os.path.join(self.output_dir, str(idx) + ".pth.tar")
+            logger = create_logger(logger_name=str(idx), log_file_path=log_file_path, logging_level=logging.DEBUG)
             solver = self.solver_type(
                 theorem_statement = self.imports + '\n' + theorem_statement,
                 project_root = self.project_root,
                 logger = logger,
                 load_file_path = None,
-                dump_file_path = dump_file_name
+                dump_file_path = dump_file_path
             )
             proof = solver.solve()
-            with open(proof_file_name, "w") as f:
+            with open(proof_file_path, "w") as f:
                 f.write(proof)
 
 if __name__ == "__main__":
@@ -128,10 +125,10 @@ if __name__ == "__main__":
         project_root = 'testbed'
         load_file_path = None
         logger = logging.getLogger(__name__)
-        log_path = "logs/aostarwrapper_test.log"
-        logging.basicConfig(filename=log_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
-        load_file_path = "checkpoints/aostarwrapper_test.pth.tar"
-        dump_file_path = "checkpoints/aostarwrapper_test.pth.tar"
+        log_file_path = "logs/aostarwrapper_test.log"
+        logging.basicConfig(filename=log_file_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
+        load_file_path = "logs/aostarwrapper_test.pth.tar"
+        dump_file_path = "logs/aostarwrapper_test.pth.tar"
         solver = AOStarBFSSolver(theorem_statement, project_root, logger, load_file_path, dump_file_path)
         proof_str = solver.solve()
         if proof_str:
@@ -139,7 +136,7 @@ if __name__ == "__main__":
             logger.info("The discovered proof: \n" + proof_str)
     else:
         # Test driving code for AOStarBatchSolver
-        lean_file_path = "/home/billion/Projects/aostar-rewritten/testbed/src/simple.lean"
+        lean_file_path = "/home/billion/Projects/aostar-rewritten/testbed/src/simple2.lean"
         project_root = 'testbed'
         batch_solver = AOStarBatchSolver(lean_file_path, AOStarBFSSolver, project_root)
         batch_solver.solve_all()

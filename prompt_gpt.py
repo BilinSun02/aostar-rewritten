@@ -79,10 +79,17 @@ def prompt_for_tactics(goals:str, avoid_steps:str="[AVOID STEPS]", n_tactics:int
                 avoid_steps += "[ERROR]This tactic has been suggested by others. You should come up with a novel tactic.[END ERROR]\n"
                 messages[1]["content"] = goals + avoid_steps
 
-        if not hasattr(prompt_for_tactics, 'gpt_token_counter'):
-            prompt_for_tactics.gpt_token_counter = 0
+        #if not hasattr(prompt_for_tactics, 'gpt_token_counter'):
+        #    prompt_for_tactics.gpt_token_counter = 0
+        # Moved to outside the function body...
         prompt_for_tactics.gpt_token_counter += gpt_response[1]['total_tokens']
         if prompt_for_tactics.gpt_token_counter >= GPTCircuitBreak.token_limit:
             raise GPTCircuitBreak(f"LLM token count reached {prompt_for_tactics.gpt_token_counter}. Terminating the program so that bugs like infinite loops won't cost too much.")
 
     return gpt_tactics
+
+# ... so that this will be run even if prompt_for_tactics is never called. This matters because
+# ao_star from aostaralgorithm.py may try to access this without calling prompt_for_tactics,
+# e.g. when a completely solved search tree is loaded from a file
+if not hasattr(prompt_for_tactics, 'gpt_token_counter'):
+    prompt_for_tactics.gpt_token_counter = 0
