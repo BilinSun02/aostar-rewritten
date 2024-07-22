@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Callable
 from dataclasses import dataclass, field
 from heapq import heapify, heappop
 from prompt_gpt import prompt_for_tactics
@@ -10,10 +10,24 @@ import datetime
 import os
 import argparse
 import logging
+from abc import ABC, abstractmethod
 
-# The root for the Lean project
-project_root = os.path.join(os.getcwd(), "testbed")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('log_path', type=str, default='logs/proof_search.log', help='where to store the log')
+    parser.add_argument('--project_root', type=str, default='testbed', help='The root for the Lean project')
+    args = parser.parse_args()
 
+    log_path = args.log_path
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(filename=log_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
+
+    project_root = os.path.abspath(args.project_root)
+else:
+    pass
+    # The functions in this script still expect the `logger` variable to be available (initialized)
+    # outside the functions themselves. When imported as a library, these variables will be
+    # set up by AOStarSolver instances.
 
 @dataclass
 class ANDNodeInfo:
@@ -56,6 +70,7 @@ class Node:
     parent: 'Node'
     node_info: ANDNodeInfo | ORNodeInfo
     children: List['Node']
+    heuristic: Callable[['Node'], float]
     state: NodeState = NodeState.PENDING
     estimation: float = None # The more positive, the more costly
     @property
@@ -65,10 +80,10 @@ class Node:
     def __post_init__(self):
         self.pending_children = self.children.copy() # To hold PENDING and FAILED children
         if not self.estimation:
-            self.estimation = heuristic(self)
+            self.estimation = self.heuristic(self)
         if self.parent is not None:
-            self.parent.children.append(node)
-            self.parent.pending_children.append(node)
+            self.parent.children.append(self)
+            self.parent.pending_children.append(self)
 
     def __lt__(self, other: 'Node') -> bool:
         # For heapq
@@ -80,19 +95,12 @@ class Node:
         # so defining equality to be equality of goals/states would suffice
         return self.node_info == other.node_info
 
-def heuristic(node: Node) -> Node:
-    return 1
-
-def init_node(parent: Node, node_info: ANDNodeInfo | ORNodeInfo) -> Node:
-    node = Node(parent=parent, node_info=node_info, estimation=heuristic(node_info), children=[])
-    return node
-
 def backtrack(node: Node) -> None:
     """
     Recursively notify parents of updated children.
     """
     assert node.children, "Backtracking on a node without children"
-    self.logger.debug(f"Backtracking on node {node=}, which was {node.solved=} before backtracking")
+    logger.debug(f"Backtracking on node {node=}, which was {node.solved=} before backtracking")
 
     match node.node_info:
         case ANDNodeInfo(_):
@@ -129,7 +137,7 @@ def expand(node: Node, proof_so_far: str) -> None:
     #    idx += 1
     #return goal_statement 
     message = "[GOALS]\n" + node.node_info.goal.format_message(1) # TODO: support it when there is more than one goal
-    self.logger.info(f"Prompting for tactics with {message=}")
+    logger.info(f"Prompting for tactics with {message=}")
 
     tactics = []
     avoid_steps = "[AVOID STEPS]\n"
@@ -140,13 +148,13 @@ def expand(node: Node, proof_so_far: str) -> None:
             tactics_import_pairs_to_try = prompt_for_tactics(message, avoid_steps=avoid_steps, n_tactics=1)
             for tactic, necessary_import in tactics_import_pairs_to_try:
                 if tactic in tactics:
-                    self.logger.warning("The LLM keeps producing the same tactic despite instructions not to do so.")
+                    logger.warning("The LLM keeps producing the same tactic despite instructions not to do so.")
                     continue
                 run_lean_proof_context, run_lean_messages = run_proof_on_lean(necessary_import + "\n" + proof_so_far + standardize_indentation(tactic) + "\nend", project_root=project_root) #TODO: this assumes indentation for tactic is 4
-                self.logger.debug(f"Running {tactic=} returns\n"
+                logger.debug(f"Running {tactic=} returns\n"
                             +f"{run_lean_messages=} and\n"
                             +f"{run_lean_proof_context=}")
-                and_node = Node(parent=node, node_info=ANDNodeInfo(proof_step=tactic, supplementary_info=necessary_import), children=[])
+                and_node = Node(parent=node, node_info=ANDNodeInfo(proof_step=tactic, supplementary_info=necessary_import), children=[], heuristic=heuristic)
                 if any(msg.level == 'error' for msg in run_lean_messages): # Presumably Lean syntactic errors
                     # Let the LLM avoid it
                     avoid_steps += "[STEP]" + tactic + "\n[ERROR]"
@@ -164,9 +172,9 @@ def expand(node: Node, proof_so_far: str) -> None:
                         and_node.estimation = 0
                         raise Done("As we assume the current node is an OR, we're done") 
                     else:
-                        self.logger.debug(f"After running {tactic=}, {run_lean_proof_context.fg_goals=}")
+                        logger.debug(f"After running {tactic=}, {run_lean_proof_context.fg_goals=}")
                         for obligation in run_lean_proof_context.fg_goals: # TODO: I want to deprecate the word "obligation", but it is still used in existing codebase
-                            Node(parent=and_node, node_info=ORNodeInfo(goal=obligation))
+                            Node(parent=and_node, node_info=ORNodeInfo(goal=obligation), children=[], heuristic=heuristic)
                             # We just initialize it without needing to use (or bind a name) to it yet.
                             # We don't worry about this being collected as garbage since the parent's
                             # children attribute will have a reference to it, as per how Node.__init__() is defined.
@@ -189,7 +197,7 @@ def standardize_indentation(string:str, indent_amount:int=4) -> str:
     return standardized_string
 
 def find(node: Node, proof_so_far: str) -> None:
-    self.logger.debug(f"find() visits the node {str(node.node_info)=}")
+    logger.debug(f"find() visits the node {str(node.node_info)=}")
     if not node.children:
         expand(node, proof_so_far)
     else:
@@ -210,40 +218,40 @@ def find(node: Node, proof_so_far: str) -> None:
         find(best_child, proof_so_far)
 
 def ao_star(theorem_statement: str, logger: logging.Logger) -> None: # TODO: the naming of some variables assume the thing to prove is a "theorem", but in practice it may well be an example etc.
-    self.logger = logger # This will then be used by other functions in aostar.py.
+    logger = logger # This will then be used by other functions in aostar.py.
 
     theorem_statement += "\nbegin\n"
-    root = init_node(parent=None, node_info=ANDNodeInfo(proof_step=theorem_statement))
+    root = Node(parent=None, node_info=ANDNodeInfo(proof_step=theorem_statement))
     root_proof_context, root_lean_messages = run_proof_on_lean(theorem_statement + "end", project_root=project_root)
     assert all(not msg.level == 'error' for msg in root_lean_messages), f"Problems in the theorem statement:\n{root_lean_messages}"
     root_goals = root_proof_context.fg_goals # If the assert above fails, this can't even work as root_proof_context would be `None`
     # root_goals should be a singleton: Lean just gets the theorem statement so the one goal is the conclusion of the theorem
     assert len(root_goals) == 1, "It's unexpected that the theorem statement already begets not exactly one goal." # Let me know if my assumption is wrong
     root_goal = root_goals[0]
-    root_sole_child = init_node(parent=root, node_info=ORNodeInfo(goal = root_goal))
+    root_sole_child = Node(parent=root, node_info=ORNodeInfo(goal = root_goal))
 
-    self.logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started.')
+    logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started.')
     try:
         while root.state == NodeState.PENDING:
             find(root, "")
     except KeyboardInterrupt:
-        self.logger.info("Proof search interrupted by user.")
+        logger.info("Proof search interrupted by user.")
     except BaseException as e:
-        self.logger.error(repr(e))
+        logger.error(repr(e))
     # Whether or not we had an exception, go on to print the proof search tree
 
     match root.state:
         case NodeState.SOLVED:
-            self.logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search successful.')
+            logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search successful.')
         case NodeState.FAILED:
-            self.logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search unsuccessful.')
+            logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search unsuccessful.')
         case NodeState.PENDING:
-            self.logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search did not finish.')
+            logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search did not finish.')
         case _:
-            self.logger.error(f"Proof search ended with an unexpected state {root.state=}")
-    self.logger.info("Showing solved nodes:\n" + present_solution(root))
-    self.logger.info("The above may include ANSI escape codes for colors. Make sure to use a compatible terminal emulator or editor.")
-    self.logger.info(f"Proof search incurred {prompt_for_tactics.gpt_token_counter} tokens in total.")
+            logger.error(f"Proof search ended with an unexpected state {root.state=}")
+    logger.info("Showing solved nodes:\n" + present_solution(root))
+    logger.info("The above may include ANSI escape codes for colors. Make sure to use a compatible terminal emulator or editor.")
+    logger.info(f"Proof search incurred {prompt_for_tactics.gpt_token_counter} tokens in total.")
 
 # See https://stackoverflow.com/a/287944
 class bcolors:
@@ -289,18 +297,42 @@ def present_solution(node: Node, prefix: str = '', is_last: bool = True) -> str:
     
     return solution_str
 
+
+
+__all__ = ["AOStarSolver"] # Do not export functions like find() since the name too easily clashes
+
+class AOStarSolver(ABC):
+    """
+    Very thin wrapper around functions in this module
+    This class is here to
+        (1) allow customization of heuristic() in a OOP fashion (namely, by overridding)
+        (2) set up
+    """
+
+    def __init__(self, theorem_statement: str, logger: logging.Logger) -> None:
+        self.theorem_statement = theorem_statement
+        self.logger = logger
+
+    @abstractmethod
+    def heuristic(self, node: Node) -> float:
+        return 1
+    # Note that while AOStarSolver.heuristic has signature Callable[[AOStarSolver, Node], float], while
+    # self.heuristic on any instance self has signature Callable[[Node], float] according to Python's
+    # method objects' __get__() rules, so self.heuristic can be passed to a Node but not AOStarSolver.heuristic
+
+    def solve(self):
+        logger = self.logger
+        heursitic = self.heuristic
+        aostar
+
+
+
 if __name__ == "__main__":
     # Test driving code
-    parser = argparse.ArgumentParser()
-    parser.add_argument('log_path', type=str, default='logs/proof_search.log')
-    args = parser.parse_args()
-    log_path = args.log_path
-    global_logger = logging.getLogger(__name__)
-    logging.basicConfig(filename=log_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
 
-    #task = "theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :="
-    task = "theorem inequality_chain (a b c d: ℕ) (h₀ : a ≤ b) (h₁ : b ≤ c) (h₂ : c ≤ d) : a ≤ d :="
-#    task = """import data.nat.basic
+    #theorem_statement = "theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :="
+    theorem_statement = "theorem inequality_chain (a b c d: ℕ) (h₀ : a ≤ b) (h₁ : b ≤ c) (h₂ : c ≤ d) : a ≤ d :="
+#    theorem_statement = """import data.nat.basic
 #theorem amc12a_2015_p10
 #  (x y : ℤ)
 #  (h₀ : 0 < y)
@@ -308,4 +340,4 @@ if __name__ == "__main__":
 #  (h₂ : x + y + (x * y) = 80) :
 #  x = 26 :=
 #"""
-    ao_star(task, global_logger)
+    ao_star(theorem_statement, logger)

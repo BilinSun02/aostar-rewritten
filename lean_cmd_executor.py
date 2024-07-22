@@ -19,6 +19,8 @@ from lean_parse_utils import LeanLineByLineReader
 from lean_cmd_server import LeanCmdServer
 from lean_utils import Lean3Utils
 from user_controlled_exceptions import user_controls_exceptions_of
+
+import logging
 logger = logging.getLogger()
 
 class Obligation(typing.NamedTuple):
