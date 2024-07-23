@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Mostly adapted from the copra codebase
 
 import sys
 

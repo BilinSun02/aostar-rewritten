@@ -1,0 +1,9 @@
+name: example
+num_files: 1
+datasets:
+  - project: testbed
+    files: sec/simple.lean
+      - path: 
+        theorems:
+        - mod_arith_1
+        - ab_square

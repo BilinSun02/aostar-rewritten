@@ -6,5 +6,5 @@ leanpkg build
 ```
 which, among other things, ensures Lean 3 will be run even if you also have Lean 4 installed. Then you can simply run
 ```bash
-python aostar.py
+python aostarwrappers.py
 ```

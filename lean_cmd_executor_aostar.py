@@ -2,6 +2,7 @@ from lean_cmd_server import LeanCmdServer
 import typing
 import re
 import os
+import datetime, random # For generating random temp file names
 
 # Adapted from lean_cmd_executor.py
 class Obligation(typing.NamedTuple):
@@ -22,13 +23,29 @@ class Obligation(typing.NamedTuple):
             message_str += "[HYPOTHESIS] " + hypothesis
         return message_str
 
-def run_proof_on_lean(proof: str, project_root:str=".", max_memory_in_mib:int=3000): # max_memory_in_mib was 40000 in lean_cmd_executor
-    temp_file_name = "src/temp_proof.lean"
+def run_proof_on_lean(
+    proof: str,
+    project_root: str = ".",
+    max_memory_in_mib: int = 40000,
+    timeout_in_secs: int = 60
+):
+    # Borrowed the idea of randomizing the name of the temp file here
+    # from the copra codebase
+    ticks = datetime.datetime.now().strftime("%Y-%b-%d-%H-%M-%S")
+    random_num = str(random.randint(0, 100000000))
+    temp_file_name = os.path.join("src", f"temptodel_{ticks}_{random_num}.lean")
     with open(os.path.join(project_root, temp_file_name), "w") as f:
         f.write(proof)
-    lean_server = LeanCmdServer(memory_in_mibs=max_memory_in_mib, cwd=project_root, debug=False)
-    response = lean_server.run(temp_file_name, 60)
-    return (parse_proof_context_human_readable(response.state), response.messages)
+    try:
+        lean_server = LeanCmdServer(
+            memory_in_mibs = max_memory_in_mib,
+            cwd = project_root,
+            debug = False
+        )
+        response = lean_server.run(temp_file_name, timeout_in_secs=timeout_in_secs)
+        return (parse_proof_context_human_readable(response.state), response.messages)
+    finally:
+        os.remove(os.path.join(project_root, temp_file_name))
 
 # Adapted from lean_cmd_executor.py
 #TODO: either make better use of the other attributes of this class

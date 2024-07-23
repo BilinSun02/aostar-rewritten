@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Uses deprecated OpenAI <1.0.0 APIs
-# Adopted from the copra codebase
+# Adapted from the copra codebase
 
 import sys
 root_dir = f"{__file__.split('gpt_access')[0]}"

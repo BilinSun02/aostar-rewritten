@@ -75,7 +75,7 @@ class NodeState(Enum):
 
 @dataclass
 class Node:
-    parent: 'Node'
+    parent: Optional['Node']
     node_info: ANDNodeInfo | ORNodeInfo
     heuristic: Callable[['Node'], float]
     children: List['Node'] = field(default_factory=list)

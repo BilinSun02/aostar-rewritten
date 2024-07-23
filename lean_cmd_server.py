@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env epython3
+# Mostly adapted from the copra codebase
 
 import sys
 #root_dir = f"{__file__.split('src')[0]}"
@@ -102,7 +103,7 @@ class LeanCmdServer:
 
 if __name__ == "__main__":
 #    os.chdir(root_dir)
-    cwd = 'data/test/lean_proj'
+    cwd = 'testbed'
     path = 'src/simple.lean'
     server = LeanCmdServer(cwd=cwd, memory_in_mibs=4000)
     output = server.run(path, timeout_in_secs=10.0)
