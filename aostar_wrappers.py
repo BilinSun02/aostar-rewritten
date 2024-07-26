@@ -240,7 +240,7 @@ class AOStarCopraYAMLSolver(AOStarBatchSolver):
             #    for lean_file in dataset.files:
             #        current_file_theorems = OmegaConf.to_container(lean_file.theorems)
             #        lean_file_path = os.path.join(dataset.project, lean_file.path)
-            #        with open(lean_file_path, "r") as f:
+            #        with open(lean_file_billionpath, "r") as f:
             #            lean_file_contents = f.read()
 
             #        imports = self.find_imports(lean_file_contents)
