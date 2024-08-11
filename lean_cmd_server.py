@@ -30,16 +30,19 @@ EmptyResponse = LeanCmdServerResponse()
 
 class LeanCmdServer:
     has_state_message = 'tactic failed, there are unsolved goals\nstate:'
-    def __init__(self, memory_in_mibs = 40000, cwd = '.', debug=False):
-        assert cwd is not None, "cwd must be provided"
-        assert os.path.isdir(cwd), "cwd must be a valid directory"
+    def __init__(
+        self,
+        memory_in_mibs: int,
+        lean_cwd: str,
+    ):
+        assert lean_cwd is not None, "lean_cwd must be provided"
+        assert os.path.isdir(lean_cwd), "lean_cwd must be a valid directory"
         self.memory_in_mibs = memory_in_mibs
-        self.debug = debug
-        self.cwd = cwd
+        self.lean_cwd = lean_cwd
         self.process = None
 
     def run(self, filepath: str, timeout_in_secs: float = 120.0):
-        full_path = os.path.join(self.cwd, filepath)
+        full_path = os.path.join(self.lean_cwd, filepath)
         assert os.path.isfile(full_path), f"filepath must be a valid file: {filepath}"
         lean_cmd = f'lean --memory={self.memory_in_mibs} {filepath}'
         self.process = Popen(
@@ -48,7 +51,7 @@ class LeanCmdServer:
             stdin = PIPE, 
             stdout = PIPE, 
             stderr = STDOUT,
-            cwd = self.cwd, 
+            cwd = self.lean_cwd, 
             bufsize = 1, 
             universal_newlines = True)
         # Start the process, and wait for it to finish
@@ -103,8 +106,8 @@ class LeanCmdServer:
 
 if __name__ == "__main__":
 #    os.chdir(root_dir)
-    cwd = 'testbed'
+    lean_cwd = 'testbed'
     path = 'src/simple.lean'
-    server = LeanCmdServer(cwd=cwd, memory_in_mibs=4000)
+    server = LeanCmdServer(lean_cwd=lean_cwd, memory_in_mibs=4000)
     output = server.run(path, timeout_in_secs=10.0)
     print(output)

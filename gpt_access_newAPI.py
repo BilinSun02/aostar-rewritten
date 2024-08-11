@@ -120,7 +120,7 @@ class GptAccess(object):
             model: typing.Optional[str] = None,
             n: int = 1,
             max_tokens: int = 25,
-            # temperature: float = 0.25, #TODO: verify again if a high temperature is indeed needed
+            # temperature: float = 0.25, # TODO: check what temperature is good
             temperature: float = 0.25,
             top_p: float = 1.0,
             frequency_penalty: float = 0.0,

@@ -4,8 +4,39 @@ import copy
 import re
 
 class GPTCircuitBreak(Exception):
-    token_limit = 100000 #TODO: make this configurable
-    pass
+    @staticmethod
+    def cost_per_1M_tokens(model_name: str) -> int:
+        """
+        Unit: cents
+        """
+        # Data from https://openai.com/api/pricing/
+        # Accurate as of Aug 10, 2024
+        match model_name:
+            case "gpt-4o-mini":
+                return 15 # cents per million tokens
+            case "gpt-4o":
+                return 500
+            case "gpt-4o-2024-08-06":
+                return 250
+            case "gpt-4":
+                return 3000
+            case "gpt-3.5-turbo-0125":
+                return 50
+            case _: # Default to the cost of the most expensive, gpt-4-32k
+                return 6000
+
+    @staticmethod
+    def token_limit(model_name: str, budget: int) -> int:
+        """
+        Calculate admissible token usage within budget (budget unit: cents)
+        """
+        rate = GPTCircuitBreak.cost_per_1M_tokens(model_name)
+        return int((budget / rate) * 1000000)
+
+    @staticmethod
+    def calc_cost(model_name: str, n_tokens: int) -> int:
+        rate = GPTCircuitBreak.cost_per_1M_tokens(model_name)
+        return int(n_tokens * rate / 1000000)
 
 template_messages = [
         {
@@ -31,7 +62,7 @@ You are not allowed to assume any library not `import`ed in the piece given to y
         },
     ]
 
-def remove_end_line(string:str, indent_amount:int=4) ->str:
+def remove_end_line(string:str) ->str:
     """
     Given a multiline string, remove any line that has only "end" modulo whitespaces
     TODO: check if we do want to remove ALL end lines
@@ -41,7 +72,13 @@ def remove_end_line(string:str, indent_amount:int=4) ->str:
     purged_string = '\n'.join(purged_lines)
     return purged_string
 
-def prompt_for_tactics(goals:str, avoid_steps:str="[AVOID STEPS]", n_tactics:int=5) -> List[str]:
+def prompt_for_tactics(
+    goals: str,
+    avoid_steps: str = "[AVOID STEPS]",
+    n_tactics: int = 5,
+    model_name: str = "gpt-4o",
+    budget: int = 500
+) -> List[str]:
     """
     `goals` should furnish the [GOALS] section
     `avoid_steps` should furnish the [AVOID STEPS] section
@@ -50,7 +87,7 @@ def prompt_for_tactics(goals:str, avoid_steps:str="[AVOID STEPS]", n_tactics:int
     once we prepend the `necessary_import` to the existing proof
     """
     #openai_access = GptAccess(model_name="gpt-3.5-turbo")
-    openai_access = GptAccess(model_name="gpt-4o")
+    openai_access = GptAccess(model_name="gpt-4o-mini")
     messages = copy.deepcopy(template_messages)
     messages[1]["content"] = goals + avoid_steps
     gpt_tactics = []
@@ -83,13 +120,17 @@ def prompt_for_tactics(goals:str, avoid_steps:str="[AVOID STEPS]", n_tactics:int
         #    prompt_for_tactics.gpt_token_counter = 0
         # Moved to outside the function body...
         prompt_for_tactics.gpt_token_counter += gpt_response[1]['total_tokens']
-        if prompt_for_tactics.gpt_token_counter >= GPTCircuitBreak.token_limit:
-            raise GPTCircuitBreak(f"LLM token count reached {prompt_for_tactics.gpt_token_counter}. Terminating the program so that bugs like infinite loops won't cost too much.")
+        if prompt_for_tactics.gpt_token_counter >= GPTCircuitBreak.token_limit(model_name, budget):
+            raise GPTCircuitBreak(
+                f"LLM token count reached {prompt_for_tactics.gpt_token_counter}, "
+                f"incurring a cost of {GPTCircuitBreak.calc_cost(model_name, prompt_for_tactics.gpt_token_counter)} cents. "
+                "Terminating the program so that costs don't go out of hand."
+            )
 
     return gpt_tactics
 
 # ... so that this will be run even if prompt_for_tactics is never called. This matters because
-# ao_star from aostaralgorithm.py may try to access this without calling prompt_for_tactics,
+# ao_star from aostar_algorithm.py may try to access this without calling prompt_for_tactics,
 # e.g. when a completely solved search tree is loaded from a file
 if not hasattr(prompt_for_tactics, 'gpt_token_counter'):
     prompt_for_tactics.gpt_token_counter = 0

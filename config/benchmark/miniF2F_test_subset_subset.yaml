@@ -1,0 +1,16 @@
+name: miniF2F_test_subset
+num_files: 1
+language: LEAN
+few_shot_data_path_for_retrieval:
+few_shot_metadata_filename_for_retrieval:
+dfs_data_path_for_retrieval:
+dfs_metadata_filename_for_retrieval:
+datasets:
+  - project: testbed
+    files:
+      - path: src/miniF2F_test.lean
+        theorems:
+        - aime_1983_p1
+        - aime_1984_p7
+        - aime_1988_p8
+        - aime_1999_p11

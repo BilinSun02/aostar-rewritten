@@ -25,7 +25,8 @@ class Obligation(typing.NamedTuple):
 
 def run_proof_on_lean(
     proof: str,
-    project_root: str = ".",
+    lean_cwd: str = './testbed', # The root for the "Lean project"
+        # Change whenever the source code hierarchy changes
     max_memory_in_mib: int = 40000,
     timeout_in_secs: int = 60
 ):
@@ -34,18 +35,18 @@ def run_proof_on_lean(
     ticks = datetime.datetime.now().strftime("%Y-%b-%d-%H-%M-%S")
     random_num = str(random.randint(0, 100000000))
     temp_file_name = os.path.join("src", f"temptodel_{ticks}_{random_num}.lean")
-    with open(os.path.join(project_root, temp_file_name), "w") as f:
+    with open(os.path.join(lean_cwd, temp_file_name), "w") as f:
         f.write(proof)
     try:
         lean_server = LeanCmdServer(
             memory_in_mibs = max_memory_in_mib,
-            cwd = project_root,
-            debug = False
+            lean_cwd = lean_cwd,
         )
         response = lean_server.run(temp_file_name, timeout_in_secs=timeout_in_secs)
         return (parse_proof_context_human_readable(response.state), response.messages)
     finally:
-        os.remove(os.path.join(project_root, temp_file_name))
+        os.remove(os.path.join(lean_cwd, temp_file_name)) # !! TODO: uncomment
+        pass
 
 # Adapted from lean_cmd_executor.py
 #TODO: either make better use of the other attributes of this class
@@ -100,10 +101,10 @@ class ProofContext(typing.NamedTuple):
 proof_context_separator = "⊢"
 proof_context_regex = r"((\d+) goals)*([\s|\S]*?)\n\n"
 def parse_proof_context_human_readable(proof_context_str: str) -> ProofContext:
-    if proof_context_str is None or len(proof_context_str) == 0 or proof_context_separator not in proof_context_str:
-        return None
-    if proof_context_str == "no goals":
+    if not proof_context_str or proof_context_str == "no goals":
         return ProofContext.empty()
+    if proof_context_separator not in proof_context_str:
+        raise ValueError(f"Invalid {proof_context_str=}")
     proof_context_str = proof_context_str.strip()
     proof_context_str += "\n\n"
     all_matches = re.findall(proof_context_regex, proof_context_str, re.MULTILINE)
@@ -167,4 +168,4 @@ end
 #  apply trans,
 #end
 #"""
-    print(run_proof_on_lean(my_proof, project_root="./testbed/src"))
+    print(run_proof_on_lean(my_proof, lean_cwd="./testbed/src"))
