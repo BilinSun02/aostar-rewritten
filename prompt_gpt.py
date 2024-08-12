@@ -38,31 +38,59 @@ class GPTCircuitBreak(Exception):
         rate = GPTCircuitBreak.cost_per_1M_tokens(model_name)
         return int(n_tokens * rate / 1000000)
 
-template_messages = [
-        {
-            "role": "system",
-            "content": \
+prompt_message_introduction = \
 """
-You are a proficient formal theorem-proving agent in Lean 3. You can predict the next proof step given the current proof state. The proof state is described in the following format:
-1. All the goals are described under `[GOALS]` keyword. Each goal in this `[GOALS]` section is started by `[GOAL] i`, where i is a positive integer. Under each `[GOAL]`, the goal is described as a human-readable serialized version of the proof state as shown while running lean command.
-2. Each goal comes with zero or more hypotheses in a section that starts with `[HYPOTHESES]`. This section consists of zero or more `[HYPOTHESIS]` lines, each of which starts one hypothesis. Two optional sections `[DEFINITIONS]` and `[THEOREMS]` describe the relevant definitions of symbols used in that goal and some theorems or lemmas that might help simplify the goal. Each definition under `[DEFINITIONS]` starts with the prefix `[DEFINITION] i`. Each theorem/lemma within `[THEOREMS]` starts with the prefix `[THEOREM]`.
-3. Finally, a `[STEPS]` section describes proof steps used so far. Each proof step starts with the prefix `[STEP]` (note the absense of an `i` index), and is a valid Lean proof. For example, `[STEPS][STEP]rw h₁ at h₂,[STEP]{linarith},`. Do not generate `[STEP]` in *your* response as it is only used to tell you how far the proofs have progressed.
-4. An optional `[AVOID STEPS]` section collects proof steps that should NOT be generated. This section has zero or more independent `[STEP]` lines. For example, `[INCORRECT STEPS][STEP]apply h₁,[STEP]rw ←h₁`. Use this as a hint for not generating these proof steps that have been tried previously. **DO NOT** generate these `[INCORRECT STEPS]` under the same states. If the states have changed, you may regenerate them again.
-5. Each `[STEP]` under the `[AVOID STEPS]` optionally comes with an `[ERROR]` message. For example, `[ERROR]\nInvalid response:\n'We thus finish the proof.', \nStopping Reason: 'stop'.\n Please respond only in the format specified.[END ERROR]`.
+You are a proficient formal theorem-proving agent in Lean 3. You can predict the next proof step given the current proof state.
 
-Your response should consist of one proof step attempt. Syntactically, it consists of `[RUN TACTIC]` followed by one proof step that you believe will help advance the current proof state, then followed by `[END TACTIC]`. For example, `[RUN TACTIC]induction c,[END TACTIC]`.
-You are not allowed to assume any library not `import`ed in the piece given to you. You have the opportunity to include one `[IMPORT]` statement. For example, `[RUN TACTIC]linarith,[END TACTIC][IMPORT]import tactic.linarith[END IMPORT]`. What you provide in this section will be prepended to the existing proof parts, so make sure it compiles.
 """
-        },
-        {
-            'role': 'user',
-            'content': 
-"""
-"""
-        },
-    ]
 
-def remove_end_line(string:str) ->str:
+prompt_message_input_format = \
+"""
+The proof state is described in the following format:
+1. Goals are in a [GOALS] section. Each goal in this [GOALS] section is started by [GOAL]. Under each [GOAL], the goal is described as a serialized version of the proof state as shown while running lean command.
+2. Each goal comes with a [HYPOTHESES] section which consists of zero or more [HYPOTHESIS] lines. Two optional sections [DEFINITIONS] and [THEOREMS] include possibly relevant definitions and theorems.
+3. A [STEPS] section shows proof [STEP]s used so far.
+4. An optional [AVOID STEPS] section collects proof steps that you should avoid. This section has zero or more independent [STEP] lines. Each step optionally comes with an [ERROR] message.
+
+"""
+
+prompt_message_output_format_wo_chain_of_thought = \
+"""
+Your response should consist of one proof step attempt. Syntactically, it consists of [RUN TACTIC] followed by one proof step that you believe will help advance the current proof state, then followed by [END TACTIC]. For example, "[RUN TACTIC]induction c,[END TACTIC]". You may plan ahead for multiple tactics in [THOUGHTS], but in [RUN TACTIC] include only the first Lean tactic--do NOT put more than one Lean tactic in [RUN TACTIC]. You will have opportunities to follow up on that with more tactics in the future.
+If you are very certain the goal cannot be proven (e.g. "1 % 2 = 0") without an equally wrong hypothesis that might have allowed you to use "exfalso", then you may use the "sorry".
+You cannot assume any library not imported in the piece given to you. You may optionally include one [IMPORT] statement, e.g. "[IMPORT]import tactic.linarith[END IMPORT]", after [END TACTIC].
+
+"""
+
+prompt_message_output_format_with_chain_of_thought = \
+"""
+Your response should consist of one proof step attempt. Start with a section begun with [THOUGHTS] and ending with [END THOUGHTS], in which you rephrase the goal in natural language, reflect over why each failed attempt in [AVOID STEPS] failed, and informally discuss how you would correctly approach the goal, leading up to a concrete tactic. This section will not be read by others and can be as concise as you yourself can understand. Then write up a section begun with [RUN TACTIC] and ending with [END TACTIC], in which you provide one tactic to advance the current proof state. For example, "[THOUGHTS]The goal states that the sum of 1 to $n$ equals $\\frac{n(n+1)}{2}$. No failed attempts yet. No axiom apparently applicable. Will try induction.[END THOUGHTS]\n[RUN TACTIC]induction n,[END TACTIC]". You may plan ahead for multiple tactics in [THOUGHTS], but in [RUN TACTIC] include only the first Lean tactic--do NOT put more than one Lean tactic in [RUN TACTIC]. You will have opportunities to follow up on that with more tactics in the future.
+If you are very certain the goal cannot be proven (e.g. "1 % 2 = 0") without an equally wrong hypothesis that might have allowed you to use "exfalso", then you may use the "sorry".
+You cannot assume any library not imported in the piece given to you. You may optionally include one [IMPORT] statement, e.g. "[IMPORT]import tactic.linarith[END IMPORT]", after [END TACTIC].
+"""
+
+# !! TODO: the prompt still needs improvement.
+# 1. The example seems to mislead GPT to use induction for a problem as simple as a+b=b+a. Either add more explanation or simply remove the example.
+# 2. GPT fails to be very concise, and still produces full English sentences. See what we can do.
+# 3. GPT tends to produce too many steps at one time which can easily fail to compile. Even if I include "The step may have slightly more than one tactic, but not more than three; there's no need to solve the problem in one step.", it sometimes produces a lot of tactics in one step. Hence I have to tell it to only have one tactic per step for now.
+# 4. This hardcodes "sorry" to mean "the goal was abandoned". Un-hardcode this in the future if we need to use "sorry" in the future.
+
+response_token_limit = 10000
+
+prompt_message_token_limit = f"Make sure your response do not exceed {response_token_limit=}."
+
+messages_skeleton = [
+    {
+        "role": "system",
+        "content": ""
+    },
+    {
+        'role': 'user',
+        'content': ""
+    },
+]
+
+def remove_end_line(string:str) -> str:
     """
     Given a multiline string, remove any line that has only "end" modulo whitespaces
     TODO: check if we do want to remove ALL end lines
@@ -75,9 +103,11 @@ def remove_end_line(string:str) ->str:
 def prompt_for_tactics(
     goals: str,
     avoid_steps: str = "[AVOID STEPS]",
-    n_tactics: int = 5,
-    model_name: str = "gpt-4o",
-    budget: int = 500
+    n_tactics: int = 1,
+    use_chain_of_thought: bool = True,
+    include_input_format_prompt: bool = False,
+    model_name: str = "gpt-4o-mini",
+    budget: int = 500,
 ) -> List[str]:
     """
     `goals` should furnish the [GOALS] section
@@ -86,14 +116,24 @@ def prompt_for_tactics(
     Each `tactic` should compile when appended to the existing proof
     once we prepend the `necessary_import` to the existing proof
     """
+    if n_tactics != 1:
+        raise NotImplementedError("It's not currently supported to prompt for more than one tactic at a time.") # TODO: implement this.
     #openai_access = GptAccess(model_name="gpt-3.5-turbo")
-    openai_access = GptAccess(model_name="gpt-4o-mini")
-    messages = copy.deepcopy(template_messages)
+    openai_access = GptAccess(model_name=model_name)
+    messages = copy.deepcopy(messages_skeleton)
+    messages[0]["content"] = prompt_message_introduction
+    if include_input_format_prompt:
+        messages[0]["content"] += prompt_message_input_format
+    if use_chain_of_thought:
+        messages[0]["content"] += prompt_message_output_format_with_chain_of_thought
+    else:
+        messages[0]["content"] += prompt_message_output_format_wo_chain_of_thought
+    messages[0]["content"] += prompt_message_token_limit
     messages[1]["content"] = goals + avoid_steps
     gpt_tactics = []
 
     while len(gpt_tactics) < n_tactics:
-        gpt_response = openai_access.complete_chat(messages, max_tokens=200, n=1, temperature=0.2)
+        gpt_response = openai_access.complete_chat(messages, max_tokens=response_token_limit, n=1, temperature=0.2)
 
         """
         Memo: a typical GPT response looks like this:
@@ -103,11 +143,14 @@ def prompt_for_tactics(
         assert len(gpt_response[0]) == 1, "Accidentally sampling too many or too few responses from the LLM."
         for gpt_message in gpt_response[0]:
             gpt_message_str = gpt_message['content']
-            pattern = r'\[RUN TACTIC\](.*?)\[END TACTIC\](?:.*?\[IMPORT\](.*?)\[END IMPORT\])?'
+            if not use_chain_of_thought: # Add a dummy so the regex also works
+                gpt_message_str = "[THOUGHTS][END THOUGHTS]\n" + gpt_message_str
+            pattern = r'\[THOUGHTS\](.*?)\[END THOUGHTS\](?:.*?)\[RUN TACTIC\](.*?)\[END TACTIC\](?:.*?\[IMPORT\](.*?)\[END IMPORT\])?'
             tactics_with_imports = re.findall(pattern, gpt_message_str, re.DOTALL)
             # `tactics_with_imports` is the list of tuples almost meeting the docstring's need
             # We will only need to doctor the tactics a bit
-            for tactic, necessary_import in tactics_with_imports:
+            for thoughts, tactic, necessary_import in tactics_with_imports:
+                print(thoughts+'\n\n') # TODO: return this to the caller, not just print out
                 # Sometimes GPT thinks it's done and puts `end`
                 # However, that would break our program, as our program furnishes an `end` automatically
                 tactic = remove_end_line(tactic)

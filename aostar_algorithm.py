@@ -5,6 +5,7 @@ from threading import Thread
 
 from aostar_data_structures import *
 from lean_cmd_executor_aostar import run_proof_on_lean
+from search_tree_visualization import present_search_tree
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -59,21 +60,21 @@ def backtrack(node: Node, logger: Logger) -> None:
     match node:
         case ANDNode(_):
             if any(child.state == NodeState.FAILED for child in node.children):
-                node.state = NodeState.FAILED
+                node.detailed_state = NodeDetailedState.FAILED_DUE_TO_CHILDREN
             elif all(child.state == NodeState.SOLVED for child in node.children):
-                node.state = NodeState.SOLVED
+                node.detailed_state = NodeDetailedState.SOLVED
         case ORNode(_):
             if all(child.state == NodeState.FAILED for child in node.children):
-                node.state = NodeState.FAILED
+                node.detailed_state = NodeDetailedState.FAILED_DUE_TO_CHILDREN
             elif any(child.state == NodeState.SOLVED for child in node.children):
-                node.state = NodeState.SOLVED
+                node.detailed_state = NodeDetailedState.SOLVED
         case MERISTEMNode(_):
-            pass # Nothing to update--a MERISTEM node is always UNSOLVED
+            pass # Nothing to update--a MERISTEM node is always ACTIVE
         case _:
             raise TypeError(f"Unknown node type: {type(node)}")
 
     if node.parent is not None:
-        if node.state != NodeState.UNSOLVED: # Recently solved or failed
+        if node.state != NodeState.ACTIVE: # Recently solved or failed
             node.parent.remove_child(node)
         backtrack(node.parent, logger)
 
@@ -84,7 +85,7 @@ def find(
     logger: Logger
 ) -> None:
     print_friendly_node_str = str(node).replace("\n", "\\n")
-    logger.debug(f"find() visits the node {print_friendly_node_str}")
+    logger.debug(f"find() visits the node {print_friendly_node_str}, which currently has a cost estimate of {estimate(node)}")
     if not node.expanded:
         node.expand(proof_so_far, logger)
         backtrack(node, logger)
@@ -106,6 +107,10 @@ def find(
                 raise RuntimeError("A MERISTEMNode failed to be a leaf node. Check the implementation for mistakes.")
             case _:
                 raise TypeError(f"Unknown node type: {type(node)}")
+        
+        logger.debug("Costs of children:\n" +\
+            '\n'.join(f"{str(child)} has cost estimate {estimate(child)}" for child in node.children)
+        )
         best_child = min(node.unsolved_children, key=estimate)
         find(best_child, proof_so_far, estimate, logger)
 
@@ -117,6 +122,17 @@ def ao_star(
     dump_checkpoint_path: Optional[str],
     present_search_tree_file_path: Optional[str]
 ) -> None:
+    if present_search_tree_file_path.endswith('.html'):
+        logger.warning("present_search_tree_file_path ends with .html "
+            "(which is NOT recommended since it's the ANSI escape code version of the search tree "
+            "that will be written to present_search_tree_file_path). "
+            "Will skip saving the HTML version."
+        )
+        present_search_tree_ANSI_file_path = present_search_tree_file_path
+    elif present_search_tree_file_path:
+        present_search_tree_ANSI_file_path = present_search_tree_file_path
+        present_search_tree_HTML_file_path = os.path.splitext(present_search_tree_ANSI_file_path)[0] + '.html'
+
     if load_checkpoint_path:
         with open(load_checkpoint_path, 'rb') as f:
             root = pickle.load(f)
@@ -129,7 +145,6 @@ def ao_star(
         root = ANDNode(
             parent = None,
             children = [],
-            state = NodeState.UNSOLVED,
             expanded = False,
             hide_from_visualization = False,
             proof_step = theorem_statement,
@@ -144,7 +159,6 @@ def ao_star(
         ORNode(
             parent = root, 
             children = [],
-            state = NodeState.UNSOLVED,
             expanded = False,
             hide_from_visualization = False,
             goal = root_goal
@@ -152,7 +166,7 @@ def ao_star(
 
     logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started.')
     try:
-        while root.state == NodeState.UNSOLVED:
+        while root.state == NodeState.ACTIVE:
             find(root, "", estimate, logger)
             # Trick to prevent the saving process from being interrupted by KeyboardInterrupt
             # Found at https://stackoverflow.com/a/842567
@@ -160,9 +174,20 @@ def ao_star(
                 save_thread = Thread(target=serialize_tree, args=(root, dump_checkpoint_path))
                 save_thread.start()
                 save_thread.join()
-            if present_search_tree_file_path:
-                with open(present_search_tree_file_path, 'w') as f:
-                    f.write(present_search_tree(root))
+            if present_search_tree_ANSI_file_path:
+                with open(present_search_tree_ANSI_file_path, 'w') as f:
+                    f.write(present_search_tree(
+                        root,
+                        style = 'ANSI',
+                        is_part_of_solution = root.state == NodeState.ACTIVE
+                    ))
+                if present_search_tree_HTML_file_path:
+                    with open(present_search_tree_HTML_file_path, 'w') as f:
+                        f.write(present_search_tree(
+                            root,
+                            style = 'HTML',
+                            is_part_of_solution = root.state == NodeState.ACTIVE
+                        ))
     except KeyboardInterrupt:
         logger.info("Proof search interrupted by user.")
     except BaseException:
@@ -176,68 +201,22 @@ def ao_star(
             logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search successful:\n' + proof_str)
         case NodeState.FAILED:
             logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search unsuccessful.')
-        case NodeState.UNSOLVED:
+        case NodeState.ACTIVE:
             logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search did not finish.')
         case _:
             logger.error(f"Proof search ended with an unexpected state {root.state=}")
-    logger.info("Showing solved nodes:\n" + present_search_tree(root))
-    logger.info("The above may include ANSI escape codes for colors. Make sure to use a compatible terminal emulator or editor.")
+    logger.info("Proof search tree:\n" + present_search_tree(
+        root,
+        style = 'plain',
+        is_part_of_solution = root.state == NodeState.ACTIVE
+    ))
+    logger.info("The above includes Unicode characters. Make sure to use a compatible terminal emulator or editor.")
     logger.info(f"Proof search incurred {prompt_for_tactics.gpt_token_counter} tokens in total, ")
     return proof_str
 
 def serialize_tree(root: Node, file: str) -> None:
     with open(file, 'wb') as f:
         pickle.dump(root, f)
-
-# See https://stackoverflow.com/a/287944
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
-def present_search_tree(node: Node, prefix: str = '', is_last: bool = True) -> str:
-    # Prints the search tree in a format similar to the Linux `tree` command.
-    # Parts that are solved are in green or blue or boldface
-    # Others, black and non-bold
-    assert not node.hide_from_visualization, "Attempting to print a node that should be hidden from visualization."
-    search_tree_str = prefix
-    next_prefix  = prefix
-
-    boldmarker = bcolors.BOLD
-    match node:
-        case ANDNode(_):
-            colormarker = bcolors.OKGREEN
-        case ORNode(_):
-            colormarker = bcolors.OKBLUE
-        case _:
-            # MERISTEM node: should always be hidden
-            raise TypeError(f"Unexpected node type {type(node)}")
-    endmarker = bcolors.ENDC
-
-    connector = '└── ' if is_last else '├── '
-
-    if not node.solved:
-        search_tree_str += connector
-        search_tree_str += str(node).replace("\n", "\\n")
-        next_prefix     += ('    ' if is_last else '│   ')
-    else:
-        search_tree_str += colormarker + connector                                + endmarker
-        search_tree_str += boldmarker  + str(node).replace("\n", "\\n") + endmarker
-        next_prefix     += colormarker + ('    ' if is_last else '│   ')          + endmarker
-    search_tree_str += '\n'
-
-    visible_children = [child for child in node.children if not child.hide_from_visualization]
-    for i, child in enumerate(visible_children):
-        is_last_child = (i == len(visible_children) - 1)
-        search_tree_str += present_search_tree(child, next_prefix, is_last_child)
-    
-    return search_tree_str
 
 def collect_solution(node: Node, proof_so_far: str) -> str:
     assert node.solved, f"{node=} is not solved"
@@ -308,7 +287,7 @@ if __name__ == "__main__":
                     return float("inf")
                 case NodeState.SOLVED:
                     return unexpanded_heuristic(node)
-                case NodeState.UNSOLVED:
+                case NodeState.ACTIVE:
                     pass # More calculation to do
                 case _:
                     raise TypeError(f"Unrecognized node state: {node.state}")

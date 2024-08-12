@@ -41,7 +41,7 @@ class LeanCmdServer:
         self.lean_cwd = lean_cwd
         self.process = None
 
-    def run(self, filepath: str, timeout_in_secs: float = 120.0):
+    def run(self, filepath: str, timeout_in_secs: float = 120.0) -> LeanCmdServerResponse:
         full_path = os.path.join(self.lean_cwd, filepath)
         assert os.path.isfile(full_path), f"filepath must be a valid file: {filepath}"
         lean_cmd = f'lean --memory={self.memory_in_mibs} {filepath}'

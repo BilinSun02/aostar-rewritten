@@ -1,15 +1,15 @@
-import logging
-from typing import Tuple, Type, Generator, Iterator
-from dataclasses import dataclass, asdict
+import logging, datetime, os, re, traceback
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
+
+from typing import Tuple, Type, Generator, Iterator
+from omegaconf import DictConfig, OmegaConf
+
+from lean_cmd_executor_aostar import run_proof_on_lean
+from custom_logger import create_logger
 from aostar_algorithm import ao_star, NodeState
 from aostar_data_structures import *
-import datetime
-import os
-from lean_cmd_executor_aostar import run_proof_on_lean
-import re
-from custom_logger import create_logger
-from omegaconf import DictConfig, OmegaConf
+from prompt_gpt import prompt_for_tactics, GPTCircuitBreak
 
 
 @dataclass
@@ -124,10 +124,14 @@ class AOStarWidthBoundedBFSSolver(AOStarCostBasedSolver):
                 return self.cost(node)
 
 
+@dataclass
 class AOStarZigzagSolver(AOStarCostBasedSolver):
     """
     See my algorithm writeup
     """
+    repeated_tactics_count: bool = True
+    bad_tactics_count: bool = False
+    # TODO: the current AOStarBatchSolver implementation gives no way to customize these
 
     def cost(self, node: Node) -> float:
         match node:
@@ -139,35 +143,55 @@ class AOStarZigzagSolver(AOStarCostBasedSolver):
                 raise RuntimeError(f"{type(node)} node is not expected to be expanded.")
 
     def unexpanded_heuristic(self, node: Node) -> float:
+        def counts(node: Node) -> bool:
+            if node.detailed_state == NodeDetailedState.IS_REPETITIVE and not self.repeated_tactics_count:
+                return False
+            if node.detailed_state == NodeDetailedState.DOESNT_COMPILE and not self.bad_tactics_count:
+                return False
+            return True
+
         match node:
             case MERISTEMNode(_):
-                return len(node.distinct_tried_tactics)
+                return len([child for child in node.parent.children if counts(child)])
             case _:
                 return self.cost(node)
 
 
-class AOStarQuadraticZigzagSolver(AOStarCostBasedSolver):
+class AOStarQuadraticZigzagSolver(AOStarZigzagSolver):
     """
     Compared to AOStarZigzagSolver, this one uses a quadratic cost function
     thus encouraging deeper search
     """
-
-    def cost(self, node: Node) -> float:
-        match node:
-            case ANDNode(_):
-                return 1
-            case ORNode(_):
-                return 0
-            case _:
-                raise RuntimeError(f"{type(node)} node is not expected to be expanded.")
-
     def unexpanded_heuristic(self, node: Node) -> float:
         match node:
             case MERISTEMNode(_):
-                l = len(node.distinct_tried_tactics)
+                if self.repeated_tactics_count:
+                    l = len(node.parent.children)
+                else:
+                    l = len(node.distinct_tried_tactics)
                 return l * l
             case _:
                 return self.cost(node)
+
+
+class AOStarExponentialZigzagSolver(AOStarZigzagSolver):
+    """
+    Compared to AOStarZigzagSolver, this one uses a exponential cost function
+    thus encouraging deeper search
+    """
+    def unexpanded_heuristic(self, node: Node) -> float:
+        match node:
+            case MERISTEMNode(_):
+                if self.repeated_tactics_count:
+                    l = len(node.parent.children)
+                else:
+                    l = len(node.distinct_tried_tactics)
+                return 2 ** l
+            case _:
+                return self.cost(node)
+
+
+# TODO: Analyze actual search trees and consider when linear, qudratic or exponential is the best.
 
 
 @dataclass
@@ -189,7 +213,7 @@ class AOStarBatchSolver(ABC):
         logging.basicConfig(
             filename = self.main_log_file_path,
             encoding = 'utf-8',
-            level = logging.DEBUG,
+            level = logging.INFO,
             filemode = "w"
         )
     
@@ -208,6 +232,7 @@ class AOStarBatchSolver(ABC):
         pass
 
     def solve_all(self):
+        total_token_count = 0
         for idx, (thm_statement, thm_group, thm_name) in enumerate(self.all_theorems()):
             one_based_idx = idx + 1
             thm_identifier = str(one_based_idx) + " " \
@@ -225,7 +250,7 @@ class AOStarBatchSolver(ABC):
                 # This is a "dot-separated hierarchical name", in
                 # the words of the `logging` module documentation
                 log_file_path = log_file_path,
-                logging_level = logging.DEBUG
+                logging_level = logging.INFO
             )
             solver = self.solver_type(
                 theorem_statement = thm_statement,
@@ -234,12 +259,20 @@ class AOStarBatchSolver(ABC):
                 dump_checkpoint_path = dump_checkpoint_path,
                 present_search_tree_file_path = present_search_tree_file_path
             )
+            self.main_logger.info(f"Attempting to solve {thm_group}.{thm_name}; the log can be found at {log_file_path}")
             try:
                 proof = solver.solve()
                 with open(proof_file_path, "w") as f:
                     f.write(proof)
-            except: # Don't let one failure stop the others
-                pass
+            except Exception as e: # Don't let one failure stop the others
+                self.main_logger.error(f"An exception occurred: {repr(e)}")
+                self.main_logger.info(f"{traceback.format_exc()=}")
+            finally:
+                total_token_count += prompt_for_tactics.gpt_token_counter
+                prompt_for_tactics.gpt_token_counter = 0
+                LLM_cost = GPTCircuitBreak.calc_cost('gpt-4o-mini', total_token_count) / 100
+                self.main_logger.info(f"Total token count: {total_token_count}; cost: ${LLM_cost:.2f}")
+            # !! TODO: it seems that the contents of logger **also** get duplicated into the file for self.main_logger. This is not desired.
 
 
 @dataclass
@@ -414,15 +447,17 @@ if __name__ == "__main__":
         if proof_str:
             print(proof_str)
             logger.info("The discovered proof: \n" + proof_str)
-    elif False:
+    elif True:
         # Test driving code for AOStarSingleFileSolver
-        lean_file_path = "/home/billion/Projects/aostar-rewritten/testbed/src/simple2.lean"
+        lean_file_path = "/home/billion/Projects/aostar-rewritten/testbed/src/simple1.lean"
         #solver = AOStarDummySolver
         #solver = AOStarWidthBoundedBFSSolver
-        solver = AOStarZigzagSolver
+        #solver = AOStarZigzagSolver
+        #solver = AOStarQuadraticZigzagSolver
+        solver = AOStarExponentialZigzagSolver
         batch_solver = AOStarSingleFileSolver(solver, lean_file_path)
         batch_solver.solve_all()
-    elif True:
+    elif False:
         # Test driving code for AOStarCopraYAMLSolver
         #solver = AOStarDummySolver
         #solver = AOStarWidthBoundedBFSSolver

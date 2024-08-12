@@ -1,27 +1,78 @@
 from lean_cmd_server import LeanCmdServer
-import typing
+from typing import NamedTuple, Tuple, List, Dict, Any
+from lean_cmd_server import Message
 import re
 import os
 import datetime, random # For generating random temp file names
 
 # Adapted from lean_cmd_executor.py
-class Obligation(typing.NamedTuple):
-    hypotheses: typing.List[str]
+class Obligation(NamedTuple):
+    hypotheses: List[str]
     inference: str
 
     @classmethod
     def from_dict(cls, data):
         return cls(**data)
 
-    def to_dict(self) -> typing.Dict[str, typing.Any]:
+    def to_dict(self) -> Dict[str, Any]:
         return {"hypotheses": self.hypotheses,
                 "inference": self.inference}
     
-    def format_message(self, goal_idx: int) -> str:
-        message_str = f"[GOAL] {goal_idx}\n" + self.inference + "\n[HYPOTHESES]\n"
+    def format_message(self) -> str:
+        message_str = f"[GOAL] \n" + self.inference + "\n[HYPOTHESES]\n"
         for hypothesis in self.hypotheses:
             message_str += "[HYPOTHESIS] " + hypothesis
         return message_str
+
+# Adapted from lean_cmd_executor.py
+#TODO: either make better use of the other attributes of this class
+# or just eliminate this class
+class ProofContext(NamedTuple):
+    fg_goals: List[Obligation]
+    bg_goals: List[Obligation]
+    shelved_goals: List[Obligation]
+    given_up_goals: List[Obligation]
+
+    @classmethod
+    def empty(cls: 'ProofContext'):
+        return ProofContext([], [], [], [])
+
+    @classmethod
+    def from_dict(cls, data):
+        fg_goals = list(map(Obligation.from_dict, data["fg_goals"]))
+        bg_goals = list(map(Obligation.from_dict, data["bg_goals"]))
+        shelved_goals = list(map(Obligation.from_dict, data["shelved_goals"]))
+        given_up_goals = list(map(Obligation.from_dict,
+                                  data["given_up_goals"]))
+        return cls(fg_goals, bg_goals, shelved_goals, given_up_goals)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"fg_goals": list(map(Obligation.to_dict, self.fg_goals)),
+                "bg_goals": list(map(Obligation.to_dict, self.bg_goals)),
+                "shelved_goals": list(map(Obligation.to_dict,
+                                          self.shelved_goals)),
+                "given_up_goals": list(map(Obligation.to_dict,
+                                           self.given_up_goals))}
+
+    @property
+    def all_goals(self) -> List[Obligation]:
+        return self.fg_goals + self.bg_goals + \
+            self.shelved_goals + self.given_up_goals
+
+    @property
+    def focused_goal(self) -> str:
+        if self.fg_goals:
+            return self.fg_goals[0].inference
+        else:
+            return ""
+
+    @property
+    def focused_hyps(self) -> List[str]:
+        if self.fg_goals:
+            return self.fg_goals[0].hypotheses
+        else:
+            return []
+
 
 def run_proof_on_lean(
     proof: str,
@@ -29,7 +80,7 @@ def run_proof_on_lean(
         # Change whenever the source code hierarchy changes
     max_memory_in_mib: int = 40000,
     timeout_in_secs: int = 60
-):
+) -> Tuple[ProofContext, List[Message]]:
     # Borrowed the idea of randomizing the name of the temp file here
     # from the copra codebase
     ticks = datetime.datetime.now().strftime("%Y-%b-%d-%H-%M-%S")
@@ -45,57 +96,9 @@ def run_proof_on_lean(
         response = lean_server.run(temp_file_name, timeout_in_secs=timeout_in_secs)
         return (parse_proof_context_human_readable(response.state), response.messages)
     finally:
-        os.remove(os.path.join(lean_cwd, temp_file_name)) # !! TODO: uncomment
+        os.remove(os.path.join(lean_cwd, temp_file_name))
         pass
 
-# Adapted from lean_cmd_executor.py
-#TODO: either make better use of the other attributes of this class
-# or just eliminate this class
-class ProofContext(typing.NamedTuple):
-    fg_goals: typing.List[Obligation]
-    bg_goals: typing.List[Obligation]
-    shelved_goals: typing.List[Obligation]
-    given_up_goals: typing.List[Obligation]
-
-    @classmethod
-    def empty(cls: typing.Type['ProofContext']):
-        return ProofContext([], [], [], [])
-
-    @classmethod
-    def from_dict(cls, data):
-        fg_goals = list(map(Obligation.from_dict, data["fg_goals"]))
-        bg_goals = list(map(Obligation.from_dict, data["bg_goals"]))
-        shelved_goals = list(map(Obligation.from_dict, data["shelved_goals"]))
-        given_up_goals = list(map(Obligation.from_dict,
-                                  data["given_up_goals"]))
-        return cls(fg_goals, bg_goals, shelved_goals, given_up_goals)
-
-    def to_dict(self) -> typing.Dict[str, typing.Any]:
-        return {"fg_goals": list(map(Obligation.to_dict, self.fg_goals)),
-                "bg_goals": list(map(Obligation.to_dict, self.bg_goals)),
-                "shelved_goals": list(map(Obligation.to_dict,
-                                          self.shelved_goals)),
-                "given_up_goals": list(map(Obligation.to_dict,
-                                           self.given_up_goals))}
-
-    @property
-    def all_goals(self) -> typing.List[Obligation]:
-        return self.fg_goals + self.bg_goals + \
-            self.shelved_goals + self.given_up_goals
-
-    @property
-    def focused_goal(self) -> str:
-        if self.fg_goals:
-            return self.fg_goals[0].inference
-        else:
-            return ""
-
-    @property
-    def focused_hyps(self) -> typing.List[str]:
-        if self.fg_goals:
-            return self.fg_goals[0].hypotheses
-        else:
-            return []
 
 # Adapted from lean_cmd_executor.py
 proof_context_separator = "⊢"
