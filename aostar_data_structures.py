@@ -101,7 +101,6 @@ class ANDNode(Node):
     proof_step: str # One or more tactics
     necessary_import: str = field(default="") # E.g. additional necessary imports for tactics
     error_messages: List[Message] = field(default_factory=list, init=False) # Nonempty if the tactic failed to compile
-    _proof_so_far: str = field(default="", init=False) # Nonempty if the tactic failed to compile
 
     def __str__(self) -> str:
         return self.proof_step + " " + self.necessary_import

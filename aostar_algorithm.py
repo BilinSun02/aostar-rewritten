@@ -171,7 +171,11 @@ def expand(node: Node, proof_so_far: str, logger: Logger) -> None:
                         necessary_import = necessary_import
                     )
                     p.add_child(AND_peer)
-                    expand(AND_peer, proof_so_far, logger) # This is a nontrivial optimization--we expand AND nodes whenever they !! TODO: write up
+
+                    expand(AND_peer, proof_so_far, logger)
+                    # This is a nontrivial optimization--we expand AND nodes whenever they are created, rather than wait for `find()` to visit the AND node.
+                    # This is because expanding AND nodes is relatively cheap, involving only running Lean on the local machine.
+                    # TODO: allow this to be turned off
         case _:
             raise TypeError(f"Unknown node type: {type(node)}")
 
