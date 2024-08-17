@@ -461,10 +461,11 @@ if __name__ == "__main__":
         if proof_str:
             print(proof_str)
             logger.info("The discovered proof: \n" + proof_str)
-    elif True:
+    elif False:
         # Test driving code for AOStarSingleFileSolver
         lean_file_path = "/home/billion/Projects/aostar-rewritten/testbed/src/simple1.lean"
-        reuse_dir = "/home/billion/Projects/aostar-rewritten/logs/run_2024-Aug-17-01-08-59"
+        #reuse_dir = "/home/billion/Projects/aostar-rewritten/logs/run_2024-Aug-17-17-41-59"
+        reuse_dir = None
         #solver = AOStarDummySolver
         #solver = AOStarWidthBoundedBFSSolver
         #solver = AOStarZigzagSolver
@@ -476,12 +477,12 @@ if __name__ == "__main__":
             lean_file_path
         )
         batch_solver.solve_all()
-    elif False:
+    elif True:
         # Test driving code for AOStarCopraYAMLSolver
         #solver = AOStarDummySolver
         #solver = AOStarWidthBoundedBFSSolver
         #solver = AOStarQuadraticZigzagSolver
         solver = AOStarExponentialZigzagSolver
-        cfg = OmegaConf.load("config/benchmark/miniF2F_test_subset.yaml")
+        cfg = OmegaConf.load("config/benchmark/miniF2F_test_subset_subset.yaml")
         batch_solver = AOStarCopraYAMLSolver(solver, None, cfg, skip_integrity_check=True)
         batch_solver.solve_all()

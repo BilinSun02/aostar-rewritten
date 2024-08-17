@@ -106,7 +106,7 @@ def expand(node: Node, proof_so_far: str, logger: Logger) -> None:
             else:
                 logger.info(f"The tactic {p} compiles without a problem.")
 
-                if not run_lean_proof_context: # If this list is empty, we have no goals to prove; we are done
+                if not run_lean_proof_context.fg_goals: # If this list is empty, we have no goals to prove; we are done
                     node.detailed_state = NodeDetailedState.SOLVED
                 else:
                     # For each goal, we first check if the goal is already in the tree
@@ -268,20 +268,20 @@ def ao_star(
                     f.write(present_search_tree(
                         root,
                         style = 'ANSI',
-                        is_part_of_solution = root.state == NodeState.ACTIVE
+                        is_part_of_solution = root.state == NodeState.SOLVED
                     ))
                 if present_search_tree_HTML_file_path:
                     with open(present_search_tree_HTML_file_path, 'w') as f:
                         f.write(present_search_tree(
                             root,
                             style = 'HTML',
-                            is_part_of_solution = root.state == NodeState.ACTIVE
+                            is_part_of_solution = root.state == NodeState.SOLVED
                         ))
     except KeyboardInterrupt:
         logger.info("Proof search interrupted by user.")
     except BaseException:
         logger.error(traceback.format_exc())
-    # Whether or not we had an exception, go on to print the proof search tree
+    # Whether or not we had an exception, go on to print the proof search tree and other stats
 
     proof_str = ""
     match root.state:
@@ -300,12 +300,40 @@ def ao_star(
         is_part_of_solution = root.state == NodeState.ACTIVE
     ))
     logger.info("The above includes Unicode characters. Make sure to use a compatible terminal emulator or editor.")
+    logger.info(f"{calculate_expansion_rate(root):.2%} of expanded AND nodes compiled fine.")
     logger.info(f"Proof search incurred {prompt_for_tactics.gpt_token_counter} tokens, costing ${prompt_for_tactics.gpt_cost_counter/100:.2f}.")
     return proof_str
 
 def serialize_tree(root: Node, file: str) -> None:
     with open(file, 'wb') as f:
         pickle.dump(root, f)
+
+def calculate_expansion_rate(root: Node) -> float:
+    """
+    Calculate the proportion of AND nodes that "successfully" expand,
+    i.e. AND nodes with expanded==True and detailed_state!=DOESNT_COMPILE
+    """
+    compiling_count, expanded_count = 0, 0
+    counted_nodes = []
+    def traverse(node: Node) -> None:
+        nonlocal compiling_count, expanded_count
+        if isinstance(node, ANDNode):
+            if not any(node is counted_node for counted_node in counted_nodes):
+            # `node not in counted_nodes` won't work because that uses `==` rather than `is`
+                counted_nodes.append(node) # This is necessary because we no longer have a proper tree. Running DFS can visit some nodes more than once.
+                if node.expanded:
+                    expanded_count += 1
+                    if node.detailed_state != NodeDetailedState.DOESNT_COMPILE:
+                        compiling_count += 1
+                for child in node.children:
+                    traverse(child)
+
+    traverse(root)
+
+    if compiling_count == 0:
+        return 0.0
+
+    return compiling_count / expanded_count
 
 def collect_solution(node: Node, proof_so_far: str) -> str:
     assert node.solved, f"{node=} is not solved"

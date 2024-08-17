@@ -223,7 +223,7 @@ def present_search_tree(
         case NodeDetailedState.SOLVED if not is_part_of_solution:
             search_tree_str +=  downplay( endorse( connector + '── '              ) )
             search_tree_str +=          (        ( str(node).replace("\n", "\\n") ) )
-            sub_tree_prefix +=          ( endorse( '    ' if is_last else '│   '  ) )
+            sub_tree_prefix +=  downplay( endorse( '    ' if is_last else '│   '  ) )
         case NodeDetailedState.ACTIVE:
             search_tree_str +=          (        ( connector + '── '              ) )
             search_tree_str +=          (        ( str(node).replace("\n", "\\n") ) )
