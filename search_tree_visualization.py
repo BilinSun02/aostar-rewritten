@@ -51,13 +51,14 @@ class ANSIMarkers(Markers):
         downplay = self.downplay
         return f"""
 Legend.
-  "{         paint('├──', 'green') }": solved AND node that's part of the solution
-  "{         paint('├──', 'blue' ) }": solved OR node that's part of the solution
+  "{        (paint('├──', 'green'))}": solved AND node that's part of the solution
+  "{        (paint('├──', 'blue' ))}": solved OR node that's part of the solution
   "{downplay(paint('├──', 'green'))}": solved AND node that's not part of the solution
   "{downplay(paint('├──', 'blue' ))}": solved AND node that's not part of the solution
-  "{               '├──'           }": failed node that hasn't been solved and is pending for more work
-  "{               '├✖─'           }": failed node whose all children failed, or failed AND node whose tactic doesn't compile
-  "{downplay(      '├──'          )}": failed AND node whose tactic is repeatedly suggested
+  "{        (     ('├──'         ))}": active node that hasn't been solved and is pending for more work
+  "{        (     ('├✖─'         ))}": failed node whose all children failed, or failed AND node whose tactic doesn't compile
+  "{        (     ('├↺─'         ))}": failed AND node whose tactic makes no progress (e.g. leading to the same goal)
+  "{downplay(     ('├──'         ))}": failed AND node whose tactic is repeatedly suggested
 
 """
     @property
@@ -116,13 +117,14 @@ class HTMLMarkers(Markers):
 f"""
     <p>Legend:</p>
     <ul>
-    <li>"{         paint('├──', 'green') }": solved AND node that's part of the solution                                            </li>
-    <li>"{         paint('├──', 'blue' ) }": solved OR node that\'s part of the solution                                            </li>
+    <li>"{        (paint('├──', 'green'))}": solved AND node that's part of the solution                                            </li>
+    <li>"{        (paint('├──', 'blue' ))}": solved OR node that\'s part of the solution                                            </li>
     <li>"{downplay(paint('├──', 'green'))}": solved AND node that\'s not part of the solution                                       </li>
     <li>"{downplay(paint('├──', 'blue' ))}": solved OR node that\'s not part of the solution                                        </li>
-    <li>"{               '├──'           }": failed node that hasn\'t been solved and is pending for more work                      </li>
-    <li>"{               '├✖─'           }": failed node whose all children failed, or failed AND node whose tactic doesn't compile </li>
-    <li>"{downplay(      '├──'          )}": failed AND node whose tactic is repeatedly suggested                                   </li>
+    <li>"{        (     ('├──'         ))}": active node that hasn\'t been solved and is pending for more work                      </li>
+    <li>"{        (     ('├✖─'         ))}": failed node whose all children failed, or failed AND node whose tactic doesn't compile </li>
+    <li>"{        (     ('├↺─'         ))}": failed AND node whose tactic makes no progress (e.g. leading to the same goal)         </li>
+    <li>"{downplay(     ('├──'         ))}": failed AND node whose tactic is repeatedly suggested                                   </li>
     </ul>
 
     <div id="zoomableContent">
@@ -228,6 +230,10 @@ def present_search_tree(
             sub_tree_prefix +=          (        ( '    ' if is_last else '│   '  ) )
         case NodeDetailedState.FAILED_DUE_TO_CHILDREN | NodeDetailedState.DOESNT_COMPILE:
             search_tree_str +=          (        ( connector + '✖─ '              ) )
+            search_tree_str +=          (        ( str(node).replace("\n", "\\n") ) )
+            sub_tree_prefix +=          (        ( '    ' if is_last else '│   '  ) )
+        case NodeDetailedState.NO_PROGRESS:
+            search_tree_str +=          (        ( connector + '↺─ '              ) )
             search_tree_str +=          (        ( str(node).replace("\n", "\\n") ) )
             sub_tree_prefix +=          (        ( '    ' if is_last else '│   '  ) )
         case NodeDetailedState.ABANDONED | NodeDetailedState.IS_REPETITIVE:

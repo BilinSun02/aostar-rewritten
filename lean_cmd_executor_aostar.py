@@ -6,7 +6,7 @@ import os
 import datetime, random # For generating random temp file names
 
 # Adapted from lean_cmd_executor.py
-class Obligation(NamedTuple):
+class Goal(NamedTuple):
     hypotheses: List[str]
     inference: str
 
@@ -23,15 +23,21 @@ class Obligation(NamedTuple):
         for hypothesis in self.hypotheses:
             message_str += "[HYPOTHESIS] " + hypothesis
         return message_str
+    
+    def __eq__(self, other: 'Goal'):
+        if not isinstance(other, Goal):
+            return False
+        return self.inference == other.inference and set(self.hypotheses) == set(other.hypotheses) # Compares equality of lists up to permutation and duplicates
+        # TODO: This may still fail to recognize some "actually equal" goals. For instance, if one goal results from casework, it may have an additional "case 0" etc. which doesn't really make it different.
 
 # Adapted from lean_cmd_executor.py
 #TODO: either make better use of the other attributes of this class
 # or just eliminate this class
 class ProofContext(NamedTuple):
-    fg_goals: List[Obligation]
-    bg_goals: List[Obligation]
-    shelved_goals: List[Obligation]
-    given_up_goals: List[Obligation]
+    fg_goals: List[Goal]
+    bg_goals: List[Goal]
+    shelved_goals: List[Goal]
+    given_up_goals: List[Goal]
 
     @classmethod
     def empty(cls: 'ProofContext'):
@@ -39,23 +45,23 @@ class ProofContext(NamedTuple):
 
     @classmethod
     def from_dict(cls, data):
-        fg_goals = list(map(Obligation.from_dict, data["fg_goals"]))
-        bg_goals = list(map(Obligation.from_dict, data["bg_goals"]))
-        shelved_goals = list(map(Obligation.from_dict, data["shelved_goals"]))
-        given_up_goals = list(map(Obligation.from_dict,
+        fg_goals = list(map(Goal.from_dict, data["fg_goals"]))
+        bg_goals = list(map(Goal.from_dict, data["bg_goals"]))
+        shelved_goals = list(map(Goal.from_dict, data["shelved_goals"]))
+        given_up_goals = list(map(Goal.from_dict,
                                   data["given_up_goals"]))
         return cls(fg_goals, bg_goals, shelved_goals, given_up_goals)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"fg_goals": list(map(Obligation.to_dict, self.fg_goals)),
-                "bg_goals": list(map(Obligation.to_dict, self.bg_goals)),
-                "shelved_goals": list(map(Obligation.to_dict,
+        return {"fg_goals": list(map(Goal.to_dict, self.fg_goals)),
+                "bg_goals": list(map(Goal.to_dict, self.bg_goals)),
+                "shelved_goals": list(map(Goal.to_dict,
                                           self.shelved_goals)),
-                "given_up_goals": list(map(Obligation.to_dict,
+                "given_up_goals": list(map(Goal.to_dict,
                                            self.given_up_goals))}
 
     @property
-    def all_goals(self) -> List[Obligation]:
+    def all_goals(self) -> List[Goal]:
         return self.fg_goals + self.bg_goals + \
             self.shelved_goals + self.given_up_goals
 
@@ -143,7 +149,7 @@ def parse_goal(goal_str: str):
     hypotheses = [hyp.rstrip(',') for hyp in hypotheses_str.split("\n")]
     # Get rid of all the empty hypotheses
     hypotheses = [hyp for hyp in hypotheses if len(hyp) > 0]
-    goal = Obligation(hypotheses, goal)
+    goal = Goal(hypotheses, goal)
     return goal
 
 if __name__ == "__main__":

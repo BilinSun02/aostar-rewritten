@@ -2,7 +2,7 @@ import logging, datetime, os, re, traceback
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
-from typing import Tuple, Type, Generator, Iterator
+from typing import Tuple, Type, Generator, Iterator, Final
 from omegaconf import DictConfig, OmegaConf
 
 from lean_cmd_executor_aostar import run_proof_on_lean
@@ -74,9 +74,9 @@ class AOStarCostBasedSolver(AOStarSolver):
 
     def estimate(self, node: Node) -> float:
         match node:
-            case Node(_) if not node.expanded:
+            case Node() if not node.expanded:
                 return self.unexpanded_heuristic(node)
-            case Node(_) if node.state == NodeState.FAILED:
+            case Node() if node.state == NodeState.FAILED:
                 return float("inf")
             case ANDNode(_) if node.expanded:
                 return self.cost(node) +\
@@ -112,12 +112,12 @@ class AOStarWidthBoundedBFSSolver(AOStarCostBasedSolver):
 
     def unexpanded_heuristic(self, node: Node) -> float:
         match node:
-            case MERISTEMNode(_) if len(node.parent.children) <  self.BFS_width + 1:
+            case MERISTEMNode() if len(node.parents[0].children) <  self.BFS_width + 1:
                 # Expansion on the parent OR node has begun but hasn't finished
                 # The + 1 accommodates this MERISTEM itself in addition to its AND peers
                 # Force the algorithm to resume expanding (until self.BFS_width many are produced)
                 return -float("inf")
-            case MERISTEMNode(_) if len(node.parent.children) >= self.BFS_width + 1:
+            case MERISTEMNode() if len(node.parents[0].children) >= self.BFS_width + 1:
                 # Expansion on the parent OR node has finished
                 return  float("inf") # Must not expand anymore
             case _:
@@ -144,15 +144,15 @@ class AOStarZigzagSolver(AOStarCostBasedSolver):
 
     def unexpanded_heuristic(self, node: Node) -> float:
         def counts(node: Node) -> bool:
-            if node.detailed_state == NodeDetailedState.IS_REPETITIVE and not self.repeated_tactics_count:
+            if node.detailed_state in [NodeDetailedState.IS_REPETITIVE, NodeDetailedState.NO_PROGRESS] and not self.repeated_tactics_count:
                 return False
             if node.detailed_state == NodeDetailedState.DOESNT_COMPILE and not self.bad_tactics_count:
                 return False
             return True
 
         match node:
-            case MERISTEMNode(_):
-                return len([child for child in node.parent.children if counts(child)])
+            case MERISTEMNode():
+                return len([child for child in node.parents[0].children if counts(child)])
             case _:
                 return self.cost(node)
 
@@ -164,9 +164,9 @@ class AOStarQuadraticZigzagSolver(AOStarZigzagSolver):
     """
     def unexpanded_heuristic(self, node: Node) -> float:
         match node:
-            case MERISTEMNode(_):
+            case MERISTEMNode():
                 if self.repeated_tactics_count:
-                    l = len(node.parent.children)
+                    l = len(node.parents[0].children)
                 else:
                     l = len(node.distinct_tried_tactics)
                 return l * l
@@ -181,9 +181,9 @@ class AOStarExponentialZigzagSolver(AOStarZigzagSolver):
     """
     def unexpanded_heuristic(self, node: Node) -> float:
         match node:
-            case MERISTEMNode(_):
+            case MERISTEMNode():
                 if self.repeated_tactics_count:
-                    l = len(node.parent.children)
+                    l = len(node.parents[0].children)
                 else:
                     l = len(node.distinct_tried_tactics)
                 return 2 ** l
@@ -197,35 +197,41 @@ class AOStarExponentialZigzagSolver(AOStarZigzagSolver):
 @dataclass
 class AOStarBatchSolver(ABC):
     solver_type: Type[AOStarSolver]
+    reuse_dir: Optional[str]
+    identifier_str: str = field(
+        default_factory =
+            lambda: datetime.datetime.now().strftime("%Y-%b-%d-%H-%M-%S"),
+        init = False
+    )
+    output_dir: str = field(init=False)
+    main_logger: logging.Logger = field(init=False)
+    main_log_file_path: str = field(init=False)
 
     def __post_init__(self):
-        self.identifier_str = datetime.datetime.now().strftime("%Y-%b-%d-%H-%M-%S")
         os.makedirs("logs", exist_ok=True)
-        self.output_dir = f"logs/run_{self.identifier_str}"
-        try:
-            os.makedirs(self.output_dir)
-        except FileExistsError as e:
-            self.main_logger.critical(f"The directory {self.output_dir} already exists. Aborting to avoid overwriting or race conditions.")
-            raise
+        if self.reuse_dir:
+            self.output_dir = self.reuse_dir
+            os.makedirs(self.output_dir, exist_ok=True)
+        else:
+            self.output_dir = f"logs/run_{self.identifier_str}"
+            try:
+                os.makedirs(self.output_dir, exist_ok=False)
+            except FileExistsError as e:
+                self.main_logger.critical(f"The directory {self.output_dir} already exists. Aborting to avoid overwriting or race conditions.")
+                raise
 
         self.main_log_file_path = os.path.join(self.output_dir, "main.log")
-        self.main_logger = logging.getLogger(__name__)
-        logging.basicConfig(
-            filename = self.main_log_file_path,
-            encoding = 'utf-8',
-            level = logging.INFO,
-            filemode = "w"
-        )
-    
+        self.main_logger = create_logger("main", self.main_log_file_path)
+
     @abstractmethod
     def all_theorems(self) -> Iterator[Tuple[str, str, str]]:
         """
         Yields a tuple `(thm_statement, thm_group, thm_name)` each time
 
         `thm_statement` needs to be "almost complete": once we add
-            `"    sorry\nend"` to it, it should be able to compile as a lean
+            `"  sorry\nend"` to it, it should be able to compile as a lean
             file. In particular, the imports should be included.
-        `thm_group` will be used to create a subdirectory unfrt self.output_dir
+        `thm_group` will be used to create a subdirectory under self.output_dir
         `thm_name` will be used in log and dump file names for the theorem
         """
         # yield thm_statement, thm_group, thm_name
@@ -233,6 +239,7 @@ class AOStarBatchSolver(ABC):
 
     def solve_all(self):
         total_token_count = 0
+        total_cost = 0 # In cents
         for idx, (thm_statement, thm_group, thm_name) in enumerate(self.all_theorems()):
             one_based_idx = idx + 1
             thm_identifier = str(one_based_idx) + " " \
@@ -240,9 +247,9 @@ class AOStarBatchSolver(ABC):
                              # Sanitize the theorem name to make it a valid filename
             group_dir = os.path.join(self.output_dir, thm_group)
             os.makedirs(group_dir, exist_ok=True)
-            log_file_path                 = os.path.join(group_dir, thm_identifier + ".log"    )
-            proof_file_path               = os.path.join(group_dir, thm_identifier + ".lean"   )
-            dump_checkpoint_path          = os.path.join(group_dir, thm_identifier + ".pth.tar")
+            log_file_path                 = os.path.join(group_dir, thm_identifier + ".log"     )
+            proof_file_path               = os.path.join(group_dir, thm_identifier + ".lean"    )
+            dump_checkpoint_path          = os.path.join(group_dir, thm_identifier + ".pth.tar" )
             present_search_tree_file_path = os.path.join(group_dir, thm_identifier + "_tree.txt")
 
             logger = create_logger(
@@ -252,14 +259,21 @@ class AOStarBatchSolver(ABC):
                 log_file_path = log_file_path,
                 logging_level = logging.INFO
             )
+            if os.path.isfile(dump_checkpoint_path):
+                load_checkpoing_path = dump_checkpoint_path
+                self.main_logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started for {thm_group}.{thm_name}. ' +\
+                    f"Relevant log can be found at {log_file_path}.")
+            else:
+                load_checkpoing_path = None
+                self.main_logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search restarted for {thm_group}.{thm_name}. ' +\
+                    f"Log will be appended to {log_file_path}. Please note that previous token counts aren't carried over.")
             solver = self.solver_type(
                 theorem_statement = thm_statement,
                 logger = logger,
-                load_checkpoint_path = None,
+                load_checkpoint_path = load_checkpoing_path,
                 dump_checkpoint_path = dump_checkpoint_path,
                 present_search_tree_file_path = present_search_tree_file_path
             )
-            self.main_logger.info(f"Attempting to solve {thm_group}.{thm_name}; the log can be found at {log_file_path}")
             try:
                 proof = solver.solve()
                 with open(proof_file_path, "w") as f:
@@ -270,9 +284,9 @@ class AOStarBatchSolver(ABC):
             finally:
                 total_token_count += prompt_for_tactics.gpt_token_counter
                 prompt_for_tactics.gpt_token_counter = 0
-                LLM_cost = GPTCircuitBreak.calc_cost('gpt-4o-mini', total_token_count) / 100
-                self.main_logger.info(f"Total token count: {total_token_count}; cost: ${LLM_cost:.2f}")
-            # !! TODO: it seems that the contents of logger **also** get duplicated into the file for self.main_logger. This is not desired.
+                total_cost += prompt_for_tactics.gpt_cost_counter
+                prompt_for_tactics.gpt_cost_counter = 0
+                self.main_logger.info(f"Total token count so far: {total_token_count}; cost: ${total_cost/100:.2f}")
 
 
 @dataclass
@@ -450,18 +464,24 @@ if __name__ == "__main__":
     elif True:
         # Test driving code for AOStarSingleFileSolver
         lean_file_path = "/home/billion/Projects/aostar-rewritten/testbed/src/simple1.lean"
+        reuse_dir = "/home/billion/Projects/aostar-rewritten/logs/run_2024-Aug-17-01-08-59"
         #solver = AOStarDummySolver
         #solver = AOStarWidthBoundedBFSSolver
         #solver = AOStarZigzagSolver
         #solver = AOStarQuadraticZigzagSolver
         solver = AOStarExponentialZigzagSolver
-        batch_solver = AOStarSingleFileSolver(solver, lean_file_path)
+        batch_solver = AOStarSingleFileSolver(
+            solver,
+            reuse_dir,
+            lean_file_path
+        )
         batch_solver.solve_all()
     elif False:
         # Test driving code for AOStarCopraYAMLSolver
         #solver = AOStarDummySolver
         #solver = AOStarWidthBoundedBFSSolver
-        solver = AOStarQuadraticZigzagSolver
+        #solver = AOStarQuadraticZigzagSolver
+        solver = AOStarExponentialZigzagSolver
         cfg = OmegaConf.load("config/benchmark/miniF2F_test_subset.yaml")
-        batch_solver = AOStarCopraYAMLSolver(solver, cfg, skip_integrity_check=True)
+        batch_solver = AOStarCopraYAMLSolver(solver, None, cfg, skip_integrity_check=True)
         batch_solver.solve_all()

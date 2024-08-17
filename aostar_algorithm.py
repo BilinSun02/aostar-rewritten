@@ -6,6 +6,7 @@ from threading import Thread
 from aostar_data_structures import *
 from lean_cmd_executor_aostar import run_proof_on_lean
 from search_tree_visualization import present_search_tree
+from prompt_gpt import prompt_for_tactics
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -50,8 +51,9 @@ def backtrack(node: Node, logger: Logger) -> None:
     # TODO: computing estimate every time is more expensive. Add back some way to cache estimate values
     if not node.expanded:
         # This function looks at children to update the current node.
-        # As a corner case, when run on a node w/o children, pass to the parent
-        backtrack(node.parent, logger)
+        # As a corner case, when run on a node w/o children, pass to the parents
+        for parent in node.parents:
+            backtrack(parent, logger)
         return
 
     print_friendly_node_str = str(node).replace("\n", "\\n")
@@ -68,31 +70,127 @@ def backtrack(node: Node, logger: Logger) -> None:
                 node.detailed_state = NodeDetailedState.FAILED_DUE_TO_CHILDREN
             elif any(child.state == NodeState.SOLVED for child in node.children):
                 node.detailed_state = NodeDetailedState.SOLVED
-        case MERISTEMNode(_):
-            pass # Nothing to update--a MERISTEM node is always ACTIVE
+        case MERISTEMNode():
+            pass # Nothing to update--a MERISTEM node can't have children
         case _:
             raise TypeError(f"Unknown node type: {type(node)}")
 
-    if node.parent is not None:
-        if node.state != NodeState.ACTIVE: # Recently solved or failed
-            node.parent.remove_child(node)
-        backtrack(node.parent, logger)
+    if len(node.parents) > 0:
+        for parent in node.parents:
+            backtrack(parent, logger)
+
+def expand(node: Node, proof_so_far: str, logger: Logger) -> None:
+    assert not node.expanded, f"Node {node} has already been expanded"
+    if not isinstance(node, MERISTEMNode):
+        node.expanded = True
+
+    match node:
+        case ANDNode(proof_step=p, necessary_import=n):
+            node.expanded = True
+
+            proof_to_run = n + "\n" + proof_so_far + standardize_indentation(p) + "\nend"
+            run_lean_proof_context, run_lean_messages = run_proof_on_lean(proof_to_run) # TODO: this assumes indentation for tactic is 2
+            logger.debug(f"Running the tactic {p} returns\n" +\
+                        f"{run_lean_messages=} and\n" +\
+                        f"{run_lean_proof_context=}")
+            logger.debug(f"Running the tactic {p} leads to goals {run_lean_proof_context.fg_goals}")
+
+            node.error_messages = [msg for msg in run_lean_messages if msg.level == 'error']
+            if len(node.error_messages) > 0: # Presumably Lean syntactic errors
+                logger.info(
+                    f"The tactic {p} failed to compile. Error messages:\n" +
+                    "\n".join(msg.text for msg in node.error_messages) + '\n' +
+                    "Full proof:\n" + proof_to_run + '\n'
+                )
+                node.detailed_state = NodeDetailedState.DOESNT_COMPILE
+            else:
+                logger.info(f"The tactic {p} compiles without a problem.")
+
+                if not run_lean_proof_context: # If this list is empty, we have no goals to prove; we are done
+                    node.detailed_state = NodeDetailedState.SOLVED
+                else:
+                    # For each goal, we first check if the goal is already in the tree
+                    # TODO: this is recomputed every time. Consider caching.
+                    def recursion(node: Node, goal: Goal) -> Optional[ORNode]:
+                        if isinstance(node, ORNode) and node.goal == goal:
+                            return node
+                        for child in node.children:
+                            result = recursion(child, goal)
+                            if result is not None:
+                                return result
+                        return None
+
+                    for goal in run_lean_proof_context.fg_goals:
+                        already_existing_OR_node = recursion(node.root, goal)
+                        if already_existing_OR_node:
+                            if already_existing_OR_node in node.ancestors: # A "loop"
+                                node.detailed_state = NodeDetailedState.NO_PROGRESS
+                            else:
+                                node.add_child(already_existing_OR_node)
+                        else:
+                            node.add_child(ORNode(
+                                goal = goal
+                            ))
+        case ORNode(_):
+            node.add_child(MERISTEMNode())
+        case MERISTEMNode(avoid_steps_str=a, distinct_tried_tactic_import_pairs=d, parent_OR_node=p): # Yes, this works even though `avoid_steps_str` is a `@property`
+            assert not node.expanded, f"Node {node} has already been expanded"
+            # We do NOT mark MERISTEM nodes as expanded
+
+            message = "[GOALS]\n" + p.goal.format_message() # TODO: this now only includes the immediate parent's goal. Consider also including ancestors' so the LLM has better contexts.
+            print_friendly_avoid_steps_str = str(a).replace('\n', '\\n')
+            logger.info(f"Prompting for tactics with {message=} with cautions {print_friendly_avoid_steps_str}")
+            tactics_import_pairs_to_try = prompt_for_tactics(message, avoid_steps=a, n_tactics=1)
+
+            for tactic, necessary_import in tactics_import_pairs_to_try:
+                if "sorry" in tactic: # TODO: This hardcodes "sorry" to mean "the goal was abandoned". Un-hardcode this in the future if we need to use "sorry" in the future.
+                    logger.warning(f"The LLM decides to abandon the goal {p.goal}.")
+                    node.add_child(AbandonedANDNode(
+                        proof_step = tactic,
+                        necessary_import = necessary_import
+                    ))
+                    node.expanded = True
+                    node.detailed_state = NodeDetailedState.ABANDONED
+                    break
+                elif (tactic, necessary_import) in d:
+                    logger.warning(f"The LLM repeatedly produces {tactic=} despite instructions not to do so.")
+                    # Still create an AND node
+                    # so we can see at the end how many times the LLM repeats itself
+                    node.add_child(RepetitiveANDNode(
+                        proof_step = tactic,
+                        necessary_import = necessary_import
+                    ))
+                    continue
+                else:
+                    # If we reach here, we have a distinct new tactic
+                    # Let the LLM avoid suggesting the same tactic in the future
+                    d.append((tactic, necessary_import))
+
+                    AND_peer = ANDNode(
+                        proof_step = tactic,
+                        necessary_import = necessary_import
+                    )
+                    p.add_child(AND_peer)
+                    expand(AND_peer, proof_so_far, logger) # This is a nontrivial optimization--we expand AND nodes whenever they !! TODO: write up
+        case _:
+            raise TypeError(f"Unknown node type: {type(node)}")
 
 def find(
     node: Node,
     proof_so_far: str,
     estimate: Callable[[Node], float],
-    logger: Logger
+    logger: Logger,
 ) -> None:
     print_friendly_node_str = str(node).replace("\n", "\\n")
-    logger.debug(f"find() visits the node {print_friendly_node_str}, which currently has a cost estimate of {estimate(node)}")
+    logger.info(f"find() visits the node {print_friendly_node_str}, which currently has a cost estimate of {estimate(node)}")
+    # !!! TODO: change back to debug
     if not node.expanded:
-        node.expand(proof_so_far, logger)
+        expand(node, proof_so_far, logger)
         backtrack(node, logger)
     else:
         match node:
             case ANDNode(proof_step=s, necessary_import=i):
-                if node.parent is not None:
+                if node.parents:
                     # Unless the current node is the root,
                     # the tactic here needs to be indented
                     # TODO: check my assumption that all lines are indented by 2
@@ -103,7 +201,7 @@ def find(
                 proof_so_far += s
             case ORNode(_):
                 pass
-            case MERISTEMNode(_):
+            case MERISTEMNode():
                 raise RuntimeError("A MERISTEMNode failed to be a leaf node. Check the implementation for mistakes.")
             case _:
                 raise TypeError(f"Unknown node type: {type(node)}")
@@ -111,7 +209,7 @@ def find(
         logger.debug("Costs of children:\n" +\
             '\n'.join(f"{str(child)} has cost estimate {estimate(child)}" for child in node.children)
         )
-        best_child = min(node.unsolved_children, key=estimate)
+        best_child = min(node.active_children, key=estimate)
         find(best_child, proof_so_far, estimate, logger)
 
 def ao_star(
@@ -136,33 +234,20 @@ def ao_star(
     if load_checkpoint_path:
         with open(load_checkpoint_path, 'rb') as f:
             root = pickle.load(f)
+        logger.info("Loaded checkpoint from " + load_checkpoint_path)
         if root.proof_step != theorem_statement:
-            logger.warning(f"{theorem_statement=}\n differs from that of the root:\n{root.proof_step}")
+            logger.warning(f"The given {theorem_statement=}\n differs from that of the root in the checkpoint:\n{root.proof_step}")
     else:
         # Remove blank lines at the end of the string, so logs are more concise
         theorem_statement = re.sub(r'\s*\n\s*$', '', theorem_statement, flags=re.MULTILINE)
         theorem_statement += "\nbegin"
         root = ANDNode(
-            parent = None,
-            children = [],
-            expanded = False,
-            hide_from_visualization = False,
             proof_step = theorem_statement,
             necessary_import = ""
         )
-        root_proof_context, root_lean_messages = run_proof_on_lean(theorem_statement + "\nend", max_memory_in_mib=3000)
-        assert all(not msg.level == 'error' for msg in root_lean_messages), f"Problems in the theorem statement:\n{root_lean_messages}"
-        root_goals = root_proof_context.fg_goals # If the assert above fails, this can't even work as root_proof_context would be `None`
-        # root_goals should be a singleton: Lean just gets the theorem statement so the one goal is the conclusion of the theorem
-        assert len(root_goals) == 1, "It's unexpected that the theorem statement already begets not exactly one goal." # Let me know if my assumption is wrong
-        root_goal = root_goals[0]
-        ORNode(
-            parent = root, 
-            children = [],
-            expanded = False,
-            hide_from_visualization = False,
-            goal = root_goal
-        )
+        expand(root, "", logger)
+        assert root.state != NodeState.FAILED, f"Problems in the theorem statement:\n{root.error_messages}"
+        assert len(root.children) == 1, "It's unexpected that the theorem statement already begets not exactly one goal." # Let me know if my assumption is wrong
 
     logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started.')
     try:
@@ -211,7 +296,7 @@ def ao_star(
         is_part_of_solution = root.state == NodeState.ACTIVE
     ))
     logger.info("The above includes Unicode characters. Make sure to use a compatible terminal emulator or editor.")
-    logger.info(f"Proof search incurred {prompt_for_tactics.gpt_token_counter} tokens in total, ")
+    logger.info(f"Proof search incurred {prompt_for_tactics.gpt_token_counter} tokens, costing ${prompt_for_tactics.gpt_cost_counter/100:.2f}.")
     return proof_str
 
 def serialize_tree(root: Node, file: str) -> None:
@@ -222,7 +307,7 @@ def collect_solution(node: Node, proof_so_far: str) -> str:
     assert node.solved, f"{node=} is not solved"
     match node:
         case ANDNode(proof_step=proof_step, necessary_import=necessary_import):
-            if node.parent is not None:
+            if node.parents:
                 # Unless the current node is the root,
                 # the tactic here needs to be indented
                 # TODO: check my assumption that all lines are indented by 4
@@ -247,8 +332,8 @@ def collect_solution(node: Node, proof_so_far: str) -> str:
                     properly_settled = True
                     break # TODO: If more than one proof is found, print all possibilities
             if not properly_settled:
-                raise RuntimeError("OR node {node} has no solved child")
-        case MERISTEMNode(_):
+                raise RuntimeError(f"OR node {node} has no solved child")
+        case MERISTEMNode():
             raise RuntimeError("A MERISTEM node should never be part of a solution")
         case _:
             raise TypeError(f"Unknown node type: {type(node)}")
@@ -274,7 +359,7 @@ if __name__ == "__main__":
                 return 1
             case ORNode(_):
                 return 0
-            case MERISTEMNode(_):
+            case MERISTEMNode():
                 return 0
 
     def cost(node: Node) -> float: # Results in naive DFS
