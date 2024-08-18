@@ -10,7 +10,7 @@ class GPTCircuitBreak(Exception):
         Unit: cents
         """
         # Data from https://openai.com/api/pricing/
-        # Accurate as of Aug 10, 2024
+        # Accurate as of Aug 18, 2024
         match model_name:
             case "gpt-4o-mini":
                 return 15 # cents per million tokens
@@ -33,7 +33,7 @@ class GPTCircuitBreak(Exception):
         Unit: cents
         """
         # Data from https://openai.com/api/pricing/
-        # Accurate as of Aug 10, 2024
+        # Accurate as of Aug 18, 2024
         match model_name:
             case "gpt-4o-mini":
                 return 60 # cents per million tokens
@@ -74,7 +74,7 @@ The proof state is described in the following format:
 prompt_message_output_format_wo_thoughts = \
 """
 Your response should consist of one proof step attempt. Syntactically, it consists of [RUN TACTIC] followed by one proof step that you believe will help advance the current proof state, then followed by [END TACTIC]. For example, "[RUN TACTIC]induction c,[END TACTIC]".
-You may plan ahead for multiple tactics in [THOUGHTS], but do NOT aim to produce a full proof in [RUN TACTIC].Include only one Lean tactic. For instance, "[RUN TACTIC]rw [h],[END TACTIC]" is acceptable, but "[RUN TACTIC]rw [h], simp,[END TACTIC]" is strictly prohibited.
+Do NOT aim to produce a full proof in [RUN TACTIC].Aim to make the step in [RUN TACTIC] minimal. For instance, "[RUN TACTIC]rw [h'],[END TACTIC]" is preferred over "[RUN TACTIC] rw [h', ← mul_assoc, h, mul_assoc],[END TACTIC]" and "[RUN TACTIC]rw [h'], simp,[END TACTIC]".
 If you are very certain the goal cannot be proven (e.g. "1 % 2 = 0") without an equally wrong hypothesis that might have allowed you to use "exfalso", then you may use "sorry".
 You cannot assume any library not imported in the piece given to you. You may optionally include one [IMPORT] statement, e.g. "[IMPORT]import tactic.linarith[END IMPORT]", after [END TACTIC].
 
@@ -83,7 +83,7 @@ You cannot assume any library not imported in the piece given to you. You may op
 prompt_message_output_format_with_thoughts = \
 """
 Your response should consist of one proof step attempt. Start with a section begun with [THOUGHTS] and ending with [END THOUGHTS], in which you rephrase the goal in natural language, reflect over why each failed attempt in [AVOID STEPS] failed, and informally discuss how you would correctly approach the goal, leading up to a concrete tactic. This section will not be read by others and can be as concise as you yourself can understand. Then write up a section begun with [RUN TACTIC] and ending with [END TACTIC], in which you provide one tactic to advance the current proof state. For example, "[THOUGHTS]The goal states that the sum of 1 to $n$ equals $\\frac{n(n+1)}{2}$. No failed attempts yet. No axiom apparently applicable. Will try induction.[END THOUGHTS]\n[RUN TACTIC]induction n,[END TACTIC]".
-You may plan ahead for multiple tactics in [THOUGHTS], but do NOT aim to produce a full proof in [RUN TACTIC].Include only one Lean tactic. For instance, "[RUN TACTIC]rw [h],[END TACTIC]" is acceptable, but "[RUN TACTIC]rw [h], simp,[END TACTIC]" is strictly prohibited.
+You may plan ahead for multiple tactics in [THOUGHTS], but do NOT aim to produce a full proof in [RUN TACTIC].Aim to make the step in [RUN TACTIC] minimal. For instance, "[RUN TACTIC]rw [h'],[END TACTIC]" is preferred over "[RUN TACTIC] rw [h', ← mul_assoc],[END TACTIC]" and "[RUN TACTIC]rw [h'], simp,[END TACTIC]".
 If you are very certain the goal cannot be proven (e.g. "1 % 2 = 0") without an equally wrong hypothesis that might have allowed you to use "exfalso", then you may use "sorry".
 You cannot assume any library not imported in the piece given to you. You may optionally include one [IMPORT] statement, e.g. "[IMPORT]import tactic.linarith[END IMPORT]", after [END TACTIC].
 """
@@ -125,7 +125,7 @@ def prompt_for_tactics(
     n_tactics: int = 1,
     think_aloud: bool = False,
     include_input_format_prompt: bool = False,
-    model_name: str = "gpt-4o",
+    model_name: str = "gpt-4o-2024-08-06",
     budget: int = 200, # In cents
 ) -> List[str]:
     """

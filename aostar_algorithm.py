@@ -6,7 +6,7 @@ from threading import Thread
 from aostar_data_structures import *
 from lean_cmd_executor_aostar import run_proof_on_lean
 from search_tree_visualization import present_search_tree
-from prompt_gpt import prompt_for_tactics
+from prompt_gpt import prompt_for_tactics, GPTCircuitBreak
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -186,8 +186,7 @@ def find(
     logger: Logger,
 ) -> None:
     print_friendly_node_str = str(node).replace("\n", "\\n")
-    logger.info(f"find() visits the node {print_friendly_node_str}, which currently has a cost estimate of {estimate(node)}")
-    # !!! TODO: change back to debug
+    logger.debug(f"find() visits the node {print_friendly_node_str}, which currently has a cost estimate of {estimate(node)}")
     if not node.expanded:
         expand(node, proof_so_far, logger)
         backtrack(node, logger)
@@ -279,6 +278,8 @@ def ao_star(
                         ))
     except KeyboardInterrupt:
         logger.info("Proof search interrupted by user.")
+    except GPTCircuitBreak as e:
+        logger.info(str(e))
     except BaseException:
         logger.error(traceback.format_exc())
     # Whether or not we had an exception, go on to print the proof search tree and other stats
@@ -325,8 +326,8 @@ def calculate_expansion_rate(root: Node) -> float:
                     expanded_count += 1
                     if node.detailed_state != NodeDetailedState.DOESNT_COMPILE:
                         compiling_count += 1
-                for child in node.children:
-                    traverse(child)
+        for child in node.children:
+            traverse(child)
 
     traverse(root)
 
