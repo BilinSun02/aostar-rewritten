@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from typing import Literal
-from aostar_data_structures import NodeDetailedState, Node, ANDNode, ORNode
+from data_structures import NodeDetailedState, Node, ANDNode, ORNode
 
 class Markers(ABC):
     @abstractmethod
@@ -172,28 +173,19 @@ class PlainTextMarkers(Markers):
         return ''
 
 
-def present_search_tree(
+def present_search_tree_helper(
     node: Node,
-    style: Literal['ANSI', 'HTML', 'plain'] = 'plain',
+    markers: Markers,
     is_part_of_solution: bool = True,
     prefix: str = '',
-    is_last: bool = True
-) -> str:
-    # Prints the search tree in a format similar to the Linux `tree` command.
-    # Parts that are solved are in green or blue or boldface
-    # Others, black and non-bold
+    is_last: bool = True,
+    shallow: bool = False
+) -> tuple[str, list[Node]]:
+    # Used by `present_search_tree()` to print part of a search tree rooted at some specified node
+    # Does not chase any descendant that has more than one parent; such nodes are deferred and collected in the list in the returned tuple
     assert not node.hide_from_visualization, "Attempting to print a node that should be hidden from visualization."
     is_part_of_solution = is_part_of_solution and node.solved
 
-    match style:
-        case 'ANSI':
-            markers = ANSIMarkers()
-        case 'HTML':
-            markers = HTMLMarkers()
-        case 'plain':
-            markers = PlainTextMarkers()
-        case _:
-            raise ValueError(f"Unexpected style {style}")
     paint = markers.paint
     match node:
         case ANDNode(_):
@@ -206,10 +198,7 @@ def present_search_tree(
     emphasize = markers.emphasize
     downplay = markers.downplay
 
-    if not prefix:
-        search_tree_str = markers.prologue
-    else:
-        search_tree_str = prefix
+    search_tree_str = prefix
     sub_tree_prefix = prefix
 
     connector = '└' if is_last else '├'
@@ -242,18 +231,55 @@ def present_search_tree(
             sub_tree_prefix +=  downplay(        ( '    ' if is_last else '│   '  ) )
     search_tree_str += '\n'
 
-    visible_children = [child for child in node.children if not child.hide_from_visualization]
-    for i, child in enumerate(visible_children):
-        is_last_child = (i == len(visible_children) - 1)
-        search_tree_str += present_search_tree(
-            child,
-            style,
-            is_part_of_solution,
-            sub_tree_prefix,
-            is_last_child
-        )
+    nodes_to_expand_elsewhere: list[Node] = list()
+    if not shallow:
+        visible_children = [child for child in node.children if not child.hide_from_visualization]
+        for i, child in enumerate(visible_children):
+            is_last_child = (i == len(visible_children) - 1)
+            dont_chase_child = len(child.parents) > 1
+            if dont_chase_child:
+                nodes_to_expand_elsewhere.append(child)
+            ret = present_search_tree_helper(
+                child,
+                markers,
+                is_part_of_solution,
+                sub_tree_prefix,
+                is_last_child,
+                dont_chase_child
+            )
+            search_tree_str += ret[0]
+            nodes_to_expand_elsewhere += ret[1]
     
-    if not prefix:
-        search_tree_str += markers.epilogue
+    return search_tree_str, nodes_to_expand_elsewhere
+
+def present_search_tree(
+    node: Node,
+    style: Literal['ANSI', 'HTML', 'plain'] = 'plain',
+) -> str:
+    # Prints the search tree in a format similar to the Linux `tree` command.
+    # Parts that are solved are in green or blue or boldface
+    # Others, black and non-bold
+
+    match style:
+        case 'ANSI':
+            markers = ANSIMarkers()
+        case 'HTML':
+            markers = HTMLMarkers()
+        case 'plain':
+            markers = PlainTextMarkers()
+        case _:
+            raise ValueError(f"Unexpected style {style}")
+
+    full_str = markers.prologue
+
+    subtree_roots = [node]
+    for node_ in subtree_roots: # This relies on `subtree_roots` here being up-to-date after each loop body iteration. Python does guarantee this.
+        ret = present_search_tree_helper(node_, markers)
+        full_str += ret[0] + '\n'
+        for node__ in ret[1]:
+            if not any (node__ is node___ for node___ in subtree_roots):
+                subtree_roots.append(node__)
     
-    return search_tree_str
+    full_str += markers.epilogue
+    
+    return full_str

@@ -1,5 +1,6 @@
 from typing import List
 from gpt_access import GptAccess
+from dataclasses import dataclass, field
 import copy
 import re
 
@@ -119,85 +120,96 @@ def remove_end_line(string:str) -> str:
     purged_string = '\n'.join(purged_lines)
     return purged_string
 
-def prompt_for_tactics(
-    goals: str,
-    avoid_steps: str = "[AVOID STEPS]",
-    n_tactics: int = 1,
-    think_aloud: bool = False,
-    include_input_format_prompt: bool = False,
-    model_name: str = "gpt-4o-2024-08-06",
-    budget: int = 200, # In cents
-) -> List[str]:
-    """
-    `goals` should furnish the [GOALS] section
-    `avoid_steps` should furnish the [AVOID STEPS] section
-    Returns a list of (`tactic`, `necessary_import`) pairs suggested by the LLM.
-    Each `tactic` should compile when appended to the existing proof
-    once we prepend the `necessary_import` to the existing proof
-    """
-    if n_tactics != 1:
-        raise NotImplementedError("It's not currently supported to prompt for more than one tactic at a time.") # TODO: implement this.
-    #openai_access = GptAccess(model_name="gpt-3.5-turbo")
-    openai_access = GptAccess(model_name=model_name)
-    messages = copy.deepcopy(messages_skeleton)
-    messages[0]["content"] = prompt_message_introduction
-    if include_input_format_prompt:
-        messages[0]["content"] += prompt_message_input_format
-    if think_aloud:
-        messages[0]["content"] += prompt_message_output_format_with_thoughts
-    else:
-        messages[0]["content"] += prompt_message_output_format_wo_thoughts
-    messages[0]["content"] += prompt_message_token_limit
-    messages[1]["content"] = goals + avoid_steps
-    gpt_tactics = []
+@dataclass
+class GPTPrompter:
+    gpt_token_counter: float = field(default=0.0, init=False)
+    gpt_cost_counter: float = field(default=0.0, init=False)
+    n_tactics: int = 1
+    think_aloud: bool = False
+    include_input_format_prompt: bool = False
+    model_name: str = "gpt-4o-2024-08-06"
+    #model_name: str = "gpt-4o-mini"
+    budget: int = 200 # In cents
 
-    while len(gpt_tactics) < n_tactics:
-        gpt_response = openai_access.complete_chat(messages, max_tokens=response_token_limit, n=1, temperature=0.2)
-
+    def prompt_for_tactics(
+        self,
+        goals: str,
+        avoid_steps: str = "[AVOID STEPS]",
+    ) -> List[str]:
         """
-        Memo: a typical GPT response looks like this:
-        ([{'role': 'assistant', 'content': '...', 'finish_reason': 'stop'}, {'role': 'assistant', 'content': '...', 'finish_reason': 'stop'}], {'prompt_tokens': 1980, 'completion_tokens': 139, 'total_tokens': 2119, 'reason': 'stop'})
-        where the length of the list (the first element of the outermost tuple) is specified by the parameter `n` of `openai_access.complete_chat()`
+        `goals` should furnish the [GOALS] section
+        `avoid_steps` should furnish the [AVOID STEPS] section
+        Returns a list of (`tactic`, `necessary_import`) pairs suggested by the LLM.
+        Each `tactic` should compile when appended to the existing proof
+        once we prepend the `necessary_import` to the existing proof
         """
-        assert len(gpt_response[0]) == 1, "Accidentally sampling too many or too few responses from the LLM."
-        for gpt_message in gpt_response[0]:
-            gpt_message_str = gpt_message['content']
-            if not think_aloud: # Add a dummy so the regex also works
-                gpt_message_str = "[THOUGHTS][END THOUGHTS]\n" + gpt_message_str
-            pattern = r'\[THOUGHTS\](.*?)\[END THOUGHTS\](?:.*?)\[RUN TACTIC\](.*?)\[END TACTIC\](?:.*?\[IMPORT\](.*?)\[END IMPORT\])?'
-            tactics_with_imports = re.findall(pattern, gpt_message_str, re.DOTALL)
-            # `tactics_with_imports` is the list of tuples almost meeting the docstring's need
-            # We will only need to doctor the tactics a bit
-            for thoughts, tactic, necessary_import in tactics_with_imports:
-                if think_aloud:
-                    print(thoughts+'\n\n') # TODO: return this to the caller, not just print out
-                # Sometimes GPT thinks it's done and puts `end`
-                # However, that would break our program, as our program furnishes an `end` automatically
-                tactic = remove_end_line(tactic)
-                gpt_tactics.append((tactic, necessary_import))
-                avoid_steps += "[STEP]" + tactic + "\n"
-                avoid_steps += "[ERROR]This tactic has been suggested by others. You should come up with a novel tactic.[END ERROR]\n"
-                messages[1]["content"] = goals + avoid_steps
+        if self.n_tactics != 1:
+            raise NotImplementedError("It's not currently supported to prompt for more than one tactic at a time.") # TODO: implement this.
+        #openai_access = GptAccess(model_name="gpt-3.5-turbo")
+        openai_access = GptAccess(model_name=self.model_name)
+        messages = copy.deepcopy(messages_skeleton)
+        messages[0]["content"] = prompt_message_introduction
+        if self.include_input_format_prompt:
+            messages[0]["content"] += prompt_message_input_format
+        if self.think_aloud:
+            messages[0]["content"] += prompt_message_output_format_with_thoughts
+        else:
+            messages[0]["content"] += prompt_message_output_format_wo_thoughts
+        messages[0]["content"] += prompt_message_token_limit
+        messages[1]["content"] = goals + avoid_steps
+        gpt_tactics = []
 
-        #if not hasattr(prompt_for_tactics, 'gpt_token_counter'):
-        #    prompt_for_tactics.gpt_token_counter = 0
-        # Moved to outside the function body...
-        prompt_for_tactics.gpt_token_counter += gpt_response[1]['total_tokens']
-        prompt_for_tactics.gpt_cost_counter += (gpt_response[1]['prompt_tokens']/1000000) * GPTCircuitBreak.cost_per_1M_prompt_tokens(model_name)
-        prompt_for_tactics.gpt_cost_counter += (gpt_response[1]['completion_tokens']/1000000) * GPTCircuitBreak.cost_per_1M_completion_tokens(model_name)
-        if prompt_for_tactics.gpt_cost_counter >= budget:
-            raise GPTCircuitBreak(
-                f"LLM token count reached {prompt_for_tactics.gpt_token_counter}, "
-                f"incurring a cost of {prompt_for_tactics.gpt_cost_counter} cents. "
-                "Terminating the program so that costs don't go out of hand."
-            )
+        while len(gpt_tactics) < self.n_tactics:
+            gpt_response = openai_access.complete_chat(messages, max_tokens=response_token_limit, n=1, temperature=0.2)
 
-    return gpt_tactics
+            """
+            Memo: a typical GPT response looks like this:
+            ([{'role': 'assistant', 'content': '...', 'finish_reason': 'stop'}, {'role': 'assistant', 'content': '...', 'finish_reason': 'stop'}], {'prompt_tokens': 1980, 'completion_tokens': 139, 'total_tokens': 2119, 'reason': 'stop'})
+            where the length of the list (the first element of the outermost tuple) is specified by the parameter `n` of `openai_access.complete_chat()`
+            """
+            assert len(gpt_response[0]) == 1, "Accidentally sampling too many or too few responses from the LLM."
+            for gpt_message in gpt_response[0]:
+                gpt_message_str = gpt_message['content']
+                if not self.think_aloud: # Add a dummy so the regex also works
+                    gpt_message_str = "[THOUGHTS][END THOUGHTS]\n" + gpt_message_str
+                pattern = r'\[THOUGHTS\](.*?)\[END THOUGHTS\](?:.*?)\[RUN TACTIC\](.*?)\[END TACTIC\](?:.*?\[IMPORT\](.*?)\[END IMPORT\])?'
+                tactics_with_imports = re.findall(pattern, gpt_message_str, re.DOTALL)
+                # `tactics_with_imports` is the list of tuples almost meeting the docstring's need
+                # We will only need to doctor the tactics a bit
+                for thoughts, tactic, necessary_import in tactics_with_imports:
+                    if self.think_aloud:
+                        print(thoughts+'\n\n') # TODO: return this to the caller, not just print out
+                    # Sometimes GPT thinks it's done and puts `end`
+                    # However, that would break our program, as our program furnishes an `end` automatically
+                    tactic = remove_end_line(tactic)
+                    gpt_tactics.append((tactic, necessary_import))
+                    avoid_steps += "[STEP]" + tactic + "\n"
+                    avoid_steps += "[ERROR]This tactic has been suggested by others. You should come up with a novel tactic.[END ERROR]\n"
+                    messages[1]["content"] = goals + avoid_steps
 
-# ... so that this will be run even if prompt_for_tactics is never called. This matters because
-# ao_star from aostar_algorithm.py may try to access this without calling prompt_for_tactics,
-# e.g. when a completely solved search tree is loaded from a file
-if not hasattr(prompt_for_tactics, 'gpt_token_counter'):
-    prompt_for_tactics.gpt_token_counter = 0
-if not hasattr(prompt_for_tactics, 'gpt_cost_counter'):
-    prompt_for_tactics.gpt_cost_counter = 0
+            self.gpt_token_counter += gpt_response[1]['total_tokens']
+            self.gpt_cost_counter += (gpt_response[1]['prompt_tokens']/1000000) * GPTCircuitBreak.cost_per_1M_prompt_tokens(self.model_name)
+            self.gpt_cost_counter += (gpt_response[1]['completion_tokens']/1000000) * GPTCircuitBreak.cost_per_1M_completion_tokens(self.model_name)
+            if self.gpt_cost_counter >= self.budget:
+                raise GPTCircuitBreak(
+                    f"LLM token count reached {self.gpt_token_counter}, "
+                    f"incurring a cost of {self.gpt_cost_counter} cents. "
+                    "Terminating the program so that costs don't go out of hand."
+                )
+
+        return gpt_tactics
+
+    @property
+    def token_and_cost_stats(self) -> str:
+        return f"Total token count so far: {self.gpt_token_counter}; cost: ${self.gpt_cost_counter/100:.2f}"
+
+if __name__ == "__main__":
+    # Test driving code
+    goals = "[GOALS]\n[GOAL] \n1 + x = 3\n[HYPOTHESES]\n[HYPOTHESIS] x = 2\n"
+    avoid_steps = "[AVOID STEPS]\n"
+    prompter = GPTPrompter(
+        think_aloud = False,
+        model_name = "gpt-4o-mini",
+    )
+    print(prompter.prompt_for_tactics(goals, avoid_steps))
+    print(prompter.token_and_cost_stats)

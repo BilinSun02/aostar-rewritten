@@ -1,28 +1,31 @@
 import logging, datetime, os, re, traceback
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 from typing import Tuple, Type, Generator, Iterator, Final
 from omegaconf import DictConfig, OmegaConf
 
 from lean_cmd_executor_aostar import run_proof_on_lean
 from custom_logger import create_logger
-from aostar_algorithm import ao_star, NodeState
-from aostar_data_structures import *
-from prompt_gpt import prompt_for_tactics, GPTCircuitBreak
+from algorithm import ao_star, NodeState
+from data_structures import *
+from prompt_gpt import GPTPrompter
 
 
 @dataclass
 class AOStarSolver(ABC):
     """
-    Very thin wrapper around functions in aostar_algorithm
+    Very thin wrapper around functions in `algorithm.py`
     This class is here to
         (1) allow customization of heuristic() in a OOP fashion (namely, by overridding)
-        (2) set up a variables accessible to aostar_algorithm functions,
+        (2) set up a variables accessible to `algorithm.py` functions,
             without polluting the global namespace
     """
 
     theorem_statement: str
+    prompter: GPTPrompter
     logger: logging.Logger
     load_checkpoint_path: Optional[str]
     dump_checkpoint_path: Optional[str]
@@ -42,6 +45,7 @@ class AOStarSolver(ABC):
         return ao_star(
             self.theorem_statement,
             self.estimate,
+            self.prompter,
             self.logger,
             self.load_checkpoint_path,
             self.dump_checkpoint_path,
@@ -196,8 +200,12 @@ class AOStarExponentialZigzagSolver(AOStarZigzagSolver):
 
 @dataclass
 class AOStarBatchSolver(ABC):
+    max_threads: int
     solver_type: Type[AOStarSolver]
-    reuse_dir: Optional[str]
+    use_dir: Optional[str] # Use (or reuse) a directory
+    think_aloud: bool
+    model_name: str
+    budget_per_problem: int
     identifier_str: str = field(
         default_factory =
             lambda: datetime.datetime.now().strftime("%Y-%b-%d-%H-%M-%S"),
@@ -209,8 +217,8 @@ class AOStarBatchSolver(ABC):
 
     def __post_init__(self):
         os.makedirs("logs", exist_ok=True)
-        if self.reuse_dir:
-            self.output_dir = self.reuse_dir
+        if self.use_dir:
+            self.output_dir = self.use_dir
             os.makedirs(self.output_dir, exist_ok=True)
         else:
             self.output_dir = f"logs/run_{self.identifier_str}"
@@ -237,10 +245,11 @@ class AOStarBatchSolver(ABC):
         # yield thm_statement, thm_group, thm_name
         pass
 
-    def solve_all(self):
+    def solve_all(self) -> None:
         total_token_count = 0
         total_cost = 0 # In cents
-        for idx, (thm_statement, thm_group, thm_name) in enumerate(self.all_theorems()):
+
+        def solve_theorem(idx, thm_statement, thm_group, thm_name):
             one_based_idx = idx + 1
             thm_identifier = str(one_based_idx) + " " \
                              + "".join(x if x.isalnum() else "_" for x in thm_name)
@@ -252,6 +261,11 @@ class AOStarBatchSolver(ABC):
             dump_checkpoint_path          = os.path.join(group_dir, thm_identifier + ".pth.tar" )
             present_search_tree_file_path = os.path.join(group_dir, thm_identifier + "_tree.txt")
 
+            prompter = GPTPrompter(
+                model_name = self.model_name,
+                think_aloud = self.think_aloud,
+                budget = self.budget_per_problem
+            )
             logger = create_logger(
                 logger_name = thm_group + "." + thm_name,
                 # This is a "dot-separated hierarchical name", in
@@ -269,24 +283,39 @@ class AOStarBatchSolver(ABC):
                     f"Log will be appended to {log_file_path}. Please note that previous token counts aren't carried over.")
             solver = self.solver_type(
                 theorem_statement = thm_statement,
+                prompter = prompter,
                 logger = logger,
                 load_checkpoint_path = load_checkpoing_path,
                 dump_checkpoint_path = dump_checkpoint_path,
                 present_search_tree_file_path = present_search_tree_file_path
             )
+
             try:
-                proof = solver.solve()
+                proof = solver.solve() # This may throw, but the **main** thread doesn't see the exception until `future.result()` is called.
                 with open(proof_file_path, "w") as f:
                     f.write(proof)
             except Exception as e: # Don't let one failure stop the others
-                self.main_logger.error(f"An exception occurred: {repr(e)}")
+                idx, thm_statement, thm_group, thm_name = thm_info
+                self.main_logger.error(f"Failed to solve theorem {thm_name}: {repr(e)}")
                 self.main_logger.info(f"{traceback.format_exc()=}")
             finally:
-                total_token_count += prompt_for_tactics.gpt_token_counter
-                prompt_for_tactics.gpt_token_counter = 0
-                total_cost += prompt_for_tactics.gpt_cost_counter
-                prompt_for_tactics.gpt_cost_counter = 0
-                self.main_logger.info(f"Total token count so far: {total_token_count}; cost: ${total_cost/100:.2f}")
+                self.main_logger.info(f"LLM usage stats for proof search on {thm_name}: {prompter.token_and_cost_stats}")
+
+        try:
+            for idx, (thm_statement, thm_group, thm_name) in enumerate(self.all_theorems()):
+                with ThreadPoolExecutor(max_workers=self.max_threads) as executor:
+                    future_to_theorem = {
+                        executor.submit(solve_theorem, idx, thm_statement, thm_group, thm_name): (idx, thm_statement, thm_group, thm_name)
+                        for idx, (thm_statement, thm_group, thm_name) in enumerate(self.all_theorems())
+                    }
+                    
+                    for future in as_completed(future_to_theorem):
+                        thm_info = future_to_theorem[future]
+                        future.result()  # Will raise an exception if the function raised
+        except KeyboardInterrupt:
+            self.main_logger.info("Keyboard interrupt detected. Aborting proof search on all theorems.")
+            # TODO: send a KeyboardInterrupt to all the threads so they can terminate gracefully.
+            return
 
 
 @dataclass
@@ -351,7 +380,7 @@ class AOStarCopraYAMLSolver(AOStarBatchSolver):
         see miniF2F_curriculum for what's acceptible.
     2. With the yaml file as `cfg`, `cfg.datasets[0].project` should be the Lean 3
         project, i.e. where we put `leanpkg.toml`. Be sure to run `leanpkg configure`
-        and `leanpkg build` there before running `aostar_wrappers.py`.
+        and `leanpkg build` there before running `wrappers.py`.
     3. With the yaml file as `cfg`,
         `os.path.join(cfg.datasets[0].project, cfg.datasets[0].files[i].path)`
         should lead to an actual Lean 3 file, for each $i$.
@@ -444,14 +473,17 @@ if __name__ == "__main__":
         # Test driving code for AOStarWidthBoundedBFSSolver
         theorem_statement = "theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :="
         load_checkpoint_path = None
+        prompter = GPTPrompter()
         logger = logging.getLogger(__name__)
-        log_file_path = "logs/aostar_wrappers_test.log"
+        log_file_path = "logs/wrappers_test.log"
         logging.basicConfig(filename=log_file_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
-        load_checkpoint_path = "logs/aostar_wrappers_test.pth.tar"
-        dump_checkpoint_path = "logs/aostar_wrappers_test.pth.tar"
-        present_search_tree_file_path = "logs/aostar_wrappers_test.txt"
+        #load_checkpoint_path = "logs/wrappers_test.pth.tar"
+        load_checkpoint_path = None
+        dump_checkpoint_path = "logs/wrappers_test.pth.tar"
+        present_search_tree_file_path = "logs/wrappers_test.txt"
         solver = AOStarWidthBoundedBFSSolver(
             theorem_statement,
+            prompter,
             logger,
             load_checkpoint_path,
             dump_checkpoint_path,
@@ -463,26 +495,40 @@ if __name__ == "__main__":
             logger.info("The discovered proof: \n" + proof_str)
     elif False:
         # Test driving code for AOStarSingleFileSolver
-        lean_file_path = "/home/billion/Projects/aostar-rewritten/testbed/src/simple1.lean"
-        #reuse_dir = "/home/billion/Projects/aostar-rewritten/logs/run_2024-Aug-17-17-41-59"
-        reuse_dir = None
-        #solver = AOStarDummySolver
-        #solver = AOStarWidthBoundedBFSSolver
-        #solver = AOStarZigzagSolver
-        #solver = AOStarQuadraticZigzagSolver
-        solver = AOStarExponentialZigzagSolver
+        lean_file_path = "/home/billion/Projects/aostar-rewritten/testbed/src/simple2.lean"
+        #use_dir = "/home/billion/Projects/aostar-rewritten/logs/run_2024-Aug-20-20-17-57"
+        use_dir = None
+        #solver_type = AOStarDummySolver
+        #solver_type = AOStarWidthBoundedBFSSolver
+        #solver_type = AOStarZigzagSolver
+        #solver_type = AOStarQuadraticZigzagSolver
+        solver_type = AOStarExponentialZigzagSolver
         batch_solver = AOStarSingleFileSolver(
-            solver,
-            reuse_dir,
-            lean_file_path
+            max_threads = 2,
+            solver_type = solver_type,
+            use_dir = use_dir,
+            think_aloud = False,
+            model_name = "gpt-4o-2024-08-06",
+            budget_per_problem = 1,
+            lean_file_path = lean_file_path
         )
         batch_solver.solve_all()
     elif True:
         # Test driving code for AOStarCopraYAMLSolver
-        #solver = AOStarDummySolver
-        #solver = AOStarWidthBoundedBFSSolver
-        #solver = AOStarQuadraticZigzagSolver
-        solver = AOStarExponentialZigzagSolver
-        cfg = OmegaConf.load("config/benchmark/miniF2F_test_subset_subset.yaml")
-        batch_solver = AOStarCopraYAMLSolver(solver, None, cfg, skip_integrity_check=True)
+        #solver_type = AOStarDummySolver
+        #solver_type = AOStarWidthBoundedBFSSolver
+        #solver_type = AOStarQuadraticZigzagSolver
+        solver_type = AOStarExponentialZigzagSolver
+        cfg = OmegaConf.load("config/benchmark/miniF2F_test_subset_subset2.yaml")
+        batch_solver = AOStarCopraYAMLSolver(
+            max_threads = 4,
+            solver_type = solver_type,
+            use_dir = None,
+            think_aloud = True,
+            #model_name = "gpt-4",
+            model_name = "gpt-4o-2024-08-06",
+            budget_per_problem = 1,
+            cfg = cfg,
+            skip_integrity_check = True
+        )
         batch_solver.solve_all()

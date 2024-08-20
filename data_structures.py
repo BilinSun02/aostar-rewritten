@@ -5,7 +5,6 @@ from enum import Enum, auto
 
 from lean_cmd_server import Message
 from lean_cmd_executor_aostar import Goal
-#from prompt_human import prompt_for_tactics
 
 
 class NodeState(Enum):
@@ -32,6 +31,7 @@ class Node(ABC):
     hide_from_visualization: bool = field(default=False, init=False)
     _detailed_state: NodeDetailedState = field(default=NodeDetailedState.ACTIVE, init=False)
     # `init=False` avoids "non-default argument follows default argument" for derived classes: https://stackoverflow.com/a/58525728
+    _root: Optional['Node'] = field(default=None, init=False)
 
     @property
     def detailed_state(self) -> NodeDetailedState:
@@ -62,20 +62,27 @@ class Node(ABC):
     @property
     def solved(self) -> bool:
         return self.state == NodeState.SOLVED
-    
+
     @property
     def ancestors(self) -> List['Node']:
-        if len(self.parents) == 0:
-            return []
-        return [ancestor for parent in self.parents for ancestor in (parent.ancestors + [parent])]
+        found_ancestors: List['Node'] = list()
+        def find_ancestors(self) -> List['Node']:
+            nonlocal found_ancestors
+            found_ancestors.append(self)
+            for parent in self.parents:
+                if not any(parent is node for node in found_ancestors): # Without this check, we may not only duplicate the parent, but worse yet run into infinite recursions due to loops
+                    find_ancestors(parent)
+        find_ancestors(self)
+        return found_ancestors
 
     @property
     def root(self) -> 'Node':
-        if not self.parents:
-            return self
-        else:
-            assert all(parent.root is self.parents[0].root for parent in self.parents), "Something really bad must have happened. There's no unique root in the tree."
-            return self.parents[0].root
+        assert self._root, f"The root of Node {self} has not been set."
+        return self._root
+
+    @root.setter
+    def root(self, node: 'Node') -> None:
+        self._root = node
 
     def __post_init__(self):
         pass
@@ -86,12 +93,20 @@ class Node(ABC):
         # TODO: reconsider whether we want to compare parents
 
     def add_child(self, node: 'Node') -> None:
+        assert (not node._root) or (node.root in self.ancestors),\
+            f"Trying to add a node rooted at {node.root} as a child to a node rooted at {self.root}. These are not compatible."
+        node.root = self.root
         self.children.append(node)
         node.parents.append(self)
 
     @property
     def active_children(self) -> List['Node']:
         return [child for child in self.children if child.state == NodeState.ACTIVE]
+
+    @abstractmethod
+    def proof_so_far(self, path: List['Node']) -> str:
+        # `path` should start with the root node, and end with `self`.
+        pass
 
 @dataclass
 class ANDNode(Node):
@@ -111,6 +126,17 @@ class ANDNode(Node):
         # Considered equal if the proof step is equal
         # For motivation, see comments for Node.__eq__
         return Node.__eq__(self, other) and self.proof_step == other.proof_step
+        
+    def proof_so_far(self, path: List['Node']) -> str:
+        assert path[-1] is self   
+        if len(path) > 1:
+            assert path[-2] in self.parents
+            return (self.necessary_import + '\n' if self.necessary_import else "") +\
+                path[-2].proof_step + '\n' + \
+                self.proof_step
+        else:
+            return (self.necessary_import + '\n' if self.necessary_import else "") +\
+                self.proof_step
 
 @dataclass
 class AbandonedANDNode(ANDNode):
@@ -183,6 +209,9 @@ class MERISTEMNode(Node):
         if not isinstance(other, MERISTEMNode):
             return False
         return Node.__eq__(self, other)
+    
+    def proof_so_far(self, path: List['Node']) -> str:
+        raise NotImplementedError("Not implemented for MERISTEM nodes")
 
 @dataclass
 class ORNode(Node):
@@ -200,3 +229,11 @@ class ORNode(Node):
         # Considered equal if hypotheses and goals are equal
         # For motivation, see comments for Node.__eq__
         return Node.__eq__(self, other) and str(self) == str(other)
+
+    def proof_so_far(self, path: List['Node']) -> str:
+        assert path[-1] is self
+        if len(path) > 1:
+            assert path[-2] in self.parents
+            return path[-2].proof_step
+        else:
+            return ""
