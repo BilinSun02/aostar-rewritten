@@ -3,6 +3,7 @@ from typing import NamedTuple, Tuple, List, Dict, Any
 import re
 import os
 import datetime, random # For generating random temp file names
+import tempfile
 
 # Adapted from lean_cmd_executor.py
 class Goal(NamedTuple):
@@ -86,24 +87,16 @@ def run_proof_on_lean(
     max_memory_in_mib: int = 40000,
     timeout_in_secs: int = 60
 ) -> Tuple[ProofContext, List[Message]]:
-    # Borrowed the idea of randomizing the name of the temp file here
-    # from the copra codebase
-    ticks = datetime.datetime.now().strftime("%Y-%b-%d-%H-%M-%S")
-    random_num = str(random.randint(0, 100000000))
-    temp_file_name = os.path.join("src", f"temptodel_{ticks}_{random_num}.lean")
-    with open(os.path.join(lean_cwd, temp_file_name), "w") as f:
-        f.write(proof)
-    try:
+    with tempfile.NamedTemporaryFile() as temp_file:
+        # Use the temporary file
+        temp_file.write(proof.encode('utf-8'))
+        temp_file.seek(0)
         lean_server = LeanCmdServer(
             memory_in_mibs = max_memory_in_mib,
             lean_cwd = lean_cwd,
         )
-        response = lean_server.run(temp_file_name, timeout_in_secs=timeout_in_secs)
+        response = lean_server.run(temp_file.name, timeout_in_secs=timeout_in_secs)
         return (parse_proof_context_human_readable(response.state), response.messages)
-    finally:
-        os.remove(os.path.join(lean_cwd, temp_file_name))
-        pass
-
 
 # Adapted from lean_cmd_executor.py
 proof_context_separator = "⊢"
