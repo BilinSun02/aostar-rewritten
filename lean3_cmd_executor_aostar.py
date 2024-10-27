@@ -1,6 +1,5 @@
-from lean_cmd_server import LeanCmdServer
+from lean3_cmd_server import LeanCmdServer, Message
 from typing import NamedTuple, Tuple, List, Dict, Any
-from lean_cmd_server import Message
 import re
 import os
 import datetime, random # For generating random temp file names

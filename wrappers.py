@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Tuple, Type, Generator, Iterator, Final
 from omegaconf import DictConfig, OmegaConf
 
-from lean_cmd_executor_aostar import run_proof_on_lean
+from lean3_cmd_executor_aostar import run_proof_on_lean
 from custom_logger import create_logger
 from algorithm import ao_star, NodeState
 from data_structures import *
@@ -476,6 +476,8 @@ if __name__ == "__main__":
         prompter = GPTPrompter()
         logger = logging.getLogger(__name__)
         log_file_path = "logs/wrappers_test.log"
+        if not os.path.exists("./logs"):
+            os.makedirs("./logs")
         logging.basicConfig(filename=log_file_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
         #load_checkpoint_path = "logs/wrappers_test.pth.tar"
         load_checkpoint_path = None

@@ -3,7 +3,7 @@ from typing import Callable, Final
 from threading import Thread
 
 from data_structures import *
-from lean_cmd_executor_aostar import run_proof_on_lean
+from lean3_cmd_executor_aostar import run_proof_on_lean
 from search_tree_visualization import present_search_tree
 from prompt_gpt import GPTPrompter, GPTCircuitBreak
 
