@@ -1,3 +1,4 @@
+# This file is only intended to be a demo and is not a dependency of any other file.
 from gpt_access import *
 
 #openai_access = GptAccess(model_name="gpt-4o-mini")

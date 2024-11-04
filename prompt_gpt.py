@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 from gpt_access import GptAccess
 from dataclasses import dataclass, field
 import copy
@@ -65,16 +65,16 @@ You are a proficient formal theorem-proving agent in Lean 3. You can predict the
 prompt_message_input_format = \
 """
 The proof state is described in the following format:
-1. Goals are in a [GOALS] section. Each goal in this [GOALS] section is started by [GOAL]. Under each [GOAL], the goal is described as a serialized version of the proof state as shown while running lean command.
-2. Each goal comes with a [HYPOTHESES] section which consists of zero or more [HYPOTHESIS] lines. Two optional sections [DEFINITIONS] and [THEOREMS] include possibly relevant definitions and theorems.
-3. A [STEPS] section shows proof [STEP]s used so far.
-4. An optional [AVOID STEPS] section collects proof steps that you should avoid. This section has zero or more independent [STEP] lines. Each step optionally comes with an [ERROR] message.
+1. A [PROOF] section contains a given partial proof leading to the current proof state.
+2. A [GOALS] section collects the unsolved goals, each goal started by [GOAL].
+3. Each goal comes with a [HYPOTHESES] section of zero or more [HYPOTHESIS] lines. Two optional sections [DEFINITIONS] and [THEOREMS] include possibly relevant definitions and theorems.
+4. An [AVOID STEPS] section collects proof steps that you should avoid. This section has zero or more independent [STEP] lines. Each step optionally comes with an [ERROR] message.
 
 """
 
 prompt_message_output_format_wo_thoughts = \
 """
-Your response should consist of one proof step attempt. Syntactically, it consists of [RUN TACTIC] followed by one proof step that you believe will help advance the current proof state, then followed by [END TACTIC]. For example, "[RUN TACTIC]induction c,[END TACTIC]".
+Your response should consist of one proof step attempt, e.g., "[RUN TACTIC]induction c,[END TACTIC]".
 Do NOT aim to produce a full proof in [RUN TACTIC].Aim to make the step in [RUN TACTIC] minimal. For instance, "[RUN TACTIC]rw [h'],[END TACTIC]" is preferred over "[RUN TACTIC] rw [h', ← mul_assoc, h, mul_assoc],[END TACTIC]" and "[RUN TACTIC]rw [h'], simp,[END TACTIC]".
 If you are very certain the goal cannot be proven (e.g. "1 % 2 = 0") without an equally wrong hypothesis that might have allowed you to use "exfalso", then you may use "sorry".
 You cannot assume any library not imported in the piece given to you. You may optionally include one [IMPORT] statement, e.g. "[IMPORT]import tactic.linarith[END IMPORT]", after [END TACTIC].
@@ -87,6 +87,7 @@ Your response should consist of one proof step attempt. Start with a section beg
 You may plan ahead for multiple tactics in [THOUGHTS], but do NOT aim to produce a full proof in [RUN TACTIC].Aim to make the step in [RUN TACTIC] minimal. For instance, "[RUN TACTIC]rw [h'],[END TACTIC]" is preferred over "[RUN TACTIC] rw [h', ← mul_assoc],[END TACTIC]" and "[RUN TACTIC]rw [h'], simp,[END TACTIC]".
 If you are very certain the goal cannot be proven (e.g. "1 % 2 = 0") without an equally wrong hypothesis that might have allowed you to use "exfalso", then you may use "sorry".
 You cannot assume any library not imported in the piece given to you. You may optionally include one [IMPORT] statement, e.g. "[IMPORT]import tactic.linarith[END IMPORT]", after [END TACTIC].
+
 """
 
 # TODO: the prompt still needs improvement.
@@ -135,7 +136,7 @@ class GPTPrompter:
         self,
         goals: str,
         avoid_steps: str = "[AVOID STEPS]",
-    ) -> List[str]:
+    ) -> List[Tuple[str, str]]:
         """
         `goals` should furnish the [GOALS] section
         `avoid_steps` should furnish the [AVOID STEPS] section
@@ -145,7 +146,6 @@ class GPTPrompter:
         """
         if self.n_tactics != 1:
             raise NotImplementedError("It's not currently supported to prompt for more than one tactic at a time.") # TODO: implement this.
-        #openai_access = GptAccess(model_name="gpt-3.5-turbo")
         openai_access = GptAccess(model_name=self.model_name)
         messages = copy.deepcopy(messages_skeleton)
         messages[0]["content"] = prompt_message_introduction
@@ -157,7 +157,7 @@ class GPTPrompter:
             messages[0]["content"] += prompt_message_output_format_wo_thoughts
         messages[0]["content"] += prompt_message_token_limit
         messages[1]["content"] = goals + avoid_steps
-        gpt_tactics = []
+        gpt_tactics: List[Tuple[str, str]] = [] # tactic-import pairs
 
         while len(gpt_tactics) < self.n_tactics:
             gpt_response = openai_access.complete_chat(messages, max_tokens=response_token_limit, n=1, temperature=0.2)

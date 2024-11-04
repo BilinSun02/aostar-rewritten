@@ -3,7 +3,8 @@ from typing import Callable, Final
 from threading import Thread
 
 from data_structures import *
-from lean3_cmd_executor_aostar import run_proof_on_lean
+from verifiers.verifier import Verifier
+from verifiers.lean3 import Lean3Verifier
 from search_tree_visualization import present_search_tree
 from prompt_gpt import GPTPrompter, GPTCircuitBreak
 
@@ -93,6 +94,7 @@ def expand(
     node: Node,
     proof_so_far: str,
     prompter: GPTPrompter,
+    verifier: Verifier,
     logger: logging.Logger
 ) -> None:
     assert not node.expanded, f"Node {node} has already been expanded"
@@ -104,11 +106,11 @@ def expand(
             node.expanded = True
 
             proof_to_run = n + "\n" + proof_so_far + standardize_indentation(p) + "\nend"
-            run_lean_proof_context, run_lean_messages = run_proof_on_lean(proof_to_run) # TODO: this assumes indentation for tactic is 2
+            run_lean_proof_context, run_lean_messages = verifier.verify(proof_to_run) # TODO: this assumes indentation for tactic is 2
             logger.debug(f"Running the tactic {p} returns\n" +\
                         f"{run_lean_messages=} and\n" +\
                         f"{run_lean_proof_context=}")
-            logger.debug(f"Running the tactic {p} leads to goals {run_lean_proof_context.fg_goals}")
+            logger.debug(f"Running the tactic {p} leads to goals {run_lean_proof_context.goals}")
 
             node.error_messages = [msg for msg in run_lean_messages if msg.level == 'error']
             if len(node.error_messages) > 0: # Presumably Lean syntax errors
@@ -121,7 +123,7 @@ def expand(
             else:
                 logger.info(f"The tactic {p} compiles without a problem.")
 
-                if not run_lean_proof_context.fg_goals: # If this list is empty, we have no goals to prove; we are done
+                if not run_lean_proof_context.goals: # If this list is empty, we have no goals to prove; we are done
                     node.detailed_state = NodeDetailedState.SOLVED
                 else:
                     # For each goal, we first check if the goal is already in the tree
@@ -144,7 +146,7 @@ def expand(
                             return False
                         return any(exists_path(orig, parent, without) for parent in dest.parents)
 
-                    for goal in run_lean_proof_context.fg_goals:
+                    for goal in run_lean_proof_context.goals:
                         already_existing_OR_node = find_OR_node_with_goal_thats_a_descendant_of(node.root, goal)
                         if already_existing_OR_node:
                             node.add_child(already_existing_OR_node)
@@ -156,7 +158,8 @@ def expand(
             assert not node.expanded, f"Node {node} has already been expanded"
             # We do NOT mark MERISTEM nodes as expanded
 
-            message = "[GOALS]\n" + p.goal.format_message() # TODO: this now only includes the immediate parent's goal. Consider also including ancestors' so the LLM has better contexts.
+            message = "[PROOF]\n" + proof_so_far + '\n'
+            message += "[GOALS]\n" + p.goal.format_message() # !!!TODO: see what to put
             print_friendly_avoid_steps_str = str(a).replace('\n', '\\n')
             logger.info(f"Prompting for tactics with {message=} with cautions {print_friendly_avoid_steps_str}")
             tactics_import_pairs_to_try = prompter.prompt_for_tactics(message, avoid_steps=a)
@@ -190,7 +193,7 @@ def expand(
                     )
                     p.add_child(AND_peer)
 
-                    expand(AND_peer, proof_so_far, prompter, logger)
+                    expand(AND_peer, proof_so_far, prompter, verifier, logger)
                     # This is a nontrivial optimization--we expand AND nodes whenever they are created, rather than wait for `find()` to visit the AND node.
                     # This is because expanding AND nodes is relatively cheap, involving only running Lean on the local machine.
                     # TODO: allow this to be turned off
@@ -202,12 +205,13 @@ def find(
     proof_so_far: str,
     estimate: Callable[[Node], float],
     prompter: GPTPrompter,
+    verifier: Verifier,
     logger: logging.Logger,
 ) -> None:
     print_friendly_node_str = str(node).replace("\n", "\\n")
     logger.debug(f"find() visits the node {print_friendly_node_str}, which currently has a cost estimate of {estimate(node)}")
     if not node.expanded:
-        expand(node, proof_so_far, prompter, logger)
+        expand(node, proof_so_far, prompter, verifier, logger)
         backtrack(node, logger)
     else:
         nodes_temporarily_marked_NO_PROGRESS = list()
@@ -244,7 +248,7 @@ def find(
         )
 
         best_child = min(node.active_children, key=estimate)
-        find(best_child, proof_so_far, estimate, prompter, logger)
+        find(best_child, proof_so_far, estimate, prompter, verifier, logger)
         for changed_node, original_state in nodes_temporarily_marked_NO_PROGRESS:
             changed_node.detailed_state = original_state
 
@@ -252,6 +256,7 @@ def ao_star(
     theorem_statement: str, # Not necessarily a Lean "theorem"; can also be an "example" etc.
     estimate: Callable[[Node], float],
     prompter: GPTPrompter,
+    verifier: Verifier,
     logger: logging.Logger,
     load_checkpoint_path: Optional[str],
     dump_checkpoint_path: Optional[str],
@@ -283,14 +288,14 @@ def ao_star(
             necessary_import = ""
         )
         root.root = root
-        expand(root, "", prompter, logger)
+        expand(root, "", prompter, verifier, logger)
         assert root.state != NodeState.FAILED, f"Problems in the theorem statement:\n{root.error_messages}"
         assert len(root.children) == 1, "It's unexpected that the theorem statement already begets not exactly one goal." # Let me know if my assumption is wrong
 
     logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started.')
     try:
         while root.state == NodeState.ACTIVE:
-            find(root, "", estimate, prompter, logger)
+            find(root, "", estimate, prompter, verifier, logger)
             # Trick to prevent the saving process from being interrupted by KeyboardInterrupt
             # Found at https://stackoverflow.com/a/842567
             if dump_checkpoint_path:
@@ -449,11 +454,13 @@ if __name__ == "__main__":
                 raise NotImplementedError(f"Unable to put an estimate on {node=}")
 
     prompter = GPTPrompter(think_aloud=True, model_name="gpt-4o-mini")
+    verifier = Lean3Verifier()
 
     print(ao_star(
         theorem_statement,
         estimate,
         prompter,
+        verifier,
         logger,
         load_checkpoint_path,
         dump_checkpoint_path,

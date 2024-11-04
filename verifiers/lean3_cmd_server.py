@@ -1,6 +1,7 @@
+# !! TODO: remove this file in the future as it's been superceded by lean3.py
 #!/usr/bin/env python3
-# Mostly adapted from the copra codebase
 
+from verifiers.verifier import Message, VerificationResult, EmptyResult
 import sys
 #root_dir = f"{__file__.split('src')[0]}"
 #if root_dir not in sys.path:
@@ -9,25 +10,10 @@ import os
 import typing
 from subprocess import Popen, PIPE, STDOUT
 from dataclasses import dataclass, field
-from dataclasses_json import dataclass_json
+#from dataclasses_json import dataclass_json
+# TODO: we don't use this anymore. Remove this from package requirements.
 
-@dataclass_json
-@dataclass
-class Message:
-    level: str
-    file_name: str
-    line_num: int
-    column_num: int
-    text: str
-
-@dataclass_json
-@dataclass
-class LeanCmdServerResponse:
-    state: typing.Optional[str] = None
-    messages: typing.List[Message] = field(default_factory=list)
-
-EmptyResponse = LeanCmdServerResponse()
-
+# Adapted from the COPRA codebase
 class LeanCmdServer:
     has_state_message = 'tactic failed, there are unsolved goals\nstate:'
     def __init__(
@@ -41,7 +27,7 @@ class LeanCmdServer:
         self.lean_cwd = lean_cwd
         self.process = None
 
-    def run(self, filepath: str, timeout_in_secs: float = 120.0) -> LeanCmdServerResponse:
+    def run(self, filepath: str, timeout_in_secs: float = 120.0) -> VerificationResult:
         full_path = os.path.join(self.lean_cwd, filepath)
         assert os.path.isfile(full_path), f"filepath must be a valid file: {filepath}"
         lean_cmd = f'lean --memory={self.memory_in_mibs} {filepath}'
@@ -62,11 +48,11 @@ class LeanCmdServer:
         self.process.kill()
         # Return the output
         if len(output) == 0:
-            return EmptyResponse
+            return EmptyResult
         else:
             return self.parse_output(full_path, output) 
     
-    def parse_output(self, full_path: str, output: str):
+    def parse_output(self, full_path: str, output: str) -> VerificationResult:
         # AbsFilePath:Line:Column: [waring|error]: Message
         # First get absolute path from full path
         abs_path = os.path.abspath(full_path) + ':'
@@ -102,8 +88,9 @@ class LeanCmdServer:
             final_messages.append(Message('info', full_path, last_line_num, 0, msg))
         # re-sort
         final_messages.sort(key=lambda msg: msg.line_num)
-        return LeanCmdServerResponse(state, final_messages)
+        return VerificationResult(state, final_messages)
 
+# Unit test code
 if __name__ == "__main__":
 #    os.chdir(root_dir)
     lean_cwd = 'testbed'

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-from typing import Tuple, Type, Generator, Iterator, Final
+from typing import Tuple, Type, Generator, Iterator, Optional
 from omegaconf import DictConfig, OmegaConf
 
 from lean3_cmd_executor_aostar import run_proof_on_lean
@@ -14,6 +14,7 @@ from data_structures import *
 from prompt_gpt import GPTPrompter
 
 
+# !!TODO: pass around the Verifier instance
 @dataclass
 class AOStarSolver(ABC):
     """

@@ -3,9 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, List
 from enum import Enum, auto
 
-from lean3_cmd_server import Message
-from lean3_cmd_executor_aostar import Goal
-
+from verifiers.verifier import Message, Goal
 
 class NodeState(Enum):
     ACTIVE = auto()
