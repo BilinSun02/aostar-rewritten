@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import NamedTuple, List, Optional
+from typing import NamedTuple, List, Optional, Type
 from abc import ABC, abstractmethod
 from .language import VerifierLanguage
 
@@ -47,11 +47,12 @@ EmptyResult = VerificationResult()
 class Verifier(ABC):
     # Every field defaulting to NotImplemented
     # should be overridden in any "non-abstract" subclass
-    language: VerifierLanguage = NotImplemented
+    language_T: Type[VerifierLanguage] = NotImplemented
 
     def __init__(self):
         if self.language == NotImplemented:
-            raise TypeError("Initializing a verifier with an unknown language.")
+            raise NotImplementedError("Initializing a verifier without" +
+                                      " specifying its language.")
 
     @abstractmethod
     def verify(self, proof: str) -> VerificationResult:
