@@ -10,6 +10,7 @@ class Lean3ProofSegment(ProofSegment):
 
     def __add__(self, other: 'Lean3ProofSegment') -> 'Lean3ProofSegment':
         # Concatenate two proof steps together into one proof step.
+        # !!!TODO: check the indentation of `other.tactics`
         assert isinstance(other, Lean3ProofSegment)
 
         if self.imports and self.imports.endswith('\n'):
@@ -28,6 +29,8 @@ class Lean3ProofSegment(ProofSegment):
         return self.imports + self.tactics
 
     def indicates_abandonment(self) -> bool:
+        # This hardcodes "sorry" to mean "Abandon the goal."
+        # Un-hardcode this if we need to use "sorry" in the future.
         return "sorry" in self.tactics
 
 class Lean3Server(LanguageServer[Lean3ProofSegment]):

@@ -103,7 +103,7 @@ class Node(ABC):
         return [child for child in self.children if child.state == NodeState.ACTIVE]
 
     @abstractmethod
-    def proof_so_far(self, path: List['Node']) -> str:
+    def proof_until_self(self, path: List['Node']) -> str:
         # `path` should start with the root node, and end with `self`.
         pass
 
@@ -125,7 +125,7 @@ class ANDNode(Node):
         # For motivation, see comments for Node.__eq__
         return Node.__eq__(self, other) and self.proof_step == other.proof_step
         
-    def proof_so_far(self, path: List['Node']) -> ProofSegment:
+    def proof_until_self(self, path: List['Node']) -> ProofSegment:
         assert path[-1] is self   
         if len(path) > 1:
             assert path[-2] in self.parents
@@ -206,7 +206,7 @@ class MERISTEMNode(Node):
             return False
         return Node.__eq__(self, other)
     
-    def proof_so_far(self, path: List['Node']) -> str:
+    def proof_until_self(self, path: List['Node']) -> str:
         raise NotImplementedError("N/A for MERISTEM nodes")
 
 @dataclass
@@ -226,7 +226,7 @@ class ORNode(Node):
         # For motivation, see comments for Node.__eq__
         return Node.__eq__(self, other) and str(self) == str(other)
 
-    def proof_so_far(self, path: List['Node']) -> str:
+    def proof_until_self(self, path: List['Node']) -> str:
         assert path[-1] is self
         if len(path) > 1:
             assert path[-2] in self.parents

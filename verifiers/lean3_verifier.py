@@ -1,5 +1,4 @@
 from .verifier import *
-from .lean3 import *
 import os, tempfile
 import re
 import typing
@@ -14,8 +13,6 @@ lean3_goal_regex = rf"([\s|\S]*?){lean3_proof_state_separator}([\s|\S]*)"
 # Class adapted from lean_cmd_server.py from the COPRA codebase
 # Some methods are from lean_cmd_executor.py from the COPRA codebase
 class Lean3Verifier(Verifier):
-    language_T = Lean3
-
     def __init__(
         self,
         max_memory_in_mibs: int = 40000,

@@ -94,7 +94,7 @@ def backtrack(
 
 def expand(
     node: Node,
-    proof_so_far: str,
+    proof_so_far: ProofSegment,
     prompter: GPTPrompter,
     verifier: Verifier,
     logger: logging.Logger
@@ -104,7 +104,7 @@ def expand(
         node.expanded = True
 
     match node:
-        case ANDNode(proof_step=p, imports=n):
+        case ANDNode(proof_step=p):
             node.expanded = True
 
             proof_to_run = n + "\n" + proof_so_far + standardize_indentation(p) + "\nend"
@@ -164,16 +164,16 @@ def expand(
             print_friendly_avoid_steps_str = str(a).replace('\n', '\\n')
             logger.info(f"Prompting for tactics with proof segment {p} " +\
                         f"with cautions {print_friendly_avoid_steps_str}")
-            comment = "The current goal:\n" + p.goal.format_message() + "\n"
-            comment += "" + a # !!!! TODO: check how `a` was defined
-            proof_steps_to_try: List[ProofSegment] = prompter.prompt_for_tactics(proof_so_far, comment) # !!TODO: replace prompt_for_tactics with prompt_for_tactics
+            comment = "The current goal:\n" + p.goal.format_message() + '\n'
+            comment += a + '\n'
+            proof_steps_to_try: List[ProofSegment] = prompter.prompt_for_tactics(proof_so_far, comment) # !!TODO: replace prompt_for_tactics with predict_proof_step
 
             for proof_step in proof_steps_to_try:
-                if proof_step.indicates_abandonment: # TODO: This hardcodes "sorry" to mean "the goal was abandoned". Un-hardcode this in the future if we need to use "sorry" in the future.
+                if proof_step.indicates_abandonment:
                     logger.warning(f"The LLM decides to abandon the goal {p.goal}.")
                     node.add_child(AbandonedANDNode(proof_step))
-                    node.expanded = True
-                    node.detailed_state = NodeDetailedState.ABANDONED
+                    p.expanded = True
+                    p.detailed_state = NodeDetailedState.ABANDONED
                     break
                 elif proof_step in d:
                     logger.warning(f"The LLM repeatedly produces{proof_step=} "\
@@ -200,7 +200,7 @@ def expand(
 
 def find(
     node: Node,
-    proof_so_far: str,
+    proof_so_far: ProofSegment,
     estimate: Callable[[Node], float],
     prompter: GPTPrompter,
     verifier: Verifier,
@@ -214,15 +214,14 @@ def find(
     else:
         nodes_temporarily_marked_NO_PROGRESS = list()
         match node:
-            case ANDNode(proof_step=s, imports=i):
-                if node.parents:
-                    # Unless the current node is the root,
-                    # the tactic here needs to be indented
-                    # TODO: check my assumption that all lines are indented by 2
-                    s = standardize_indentation(s, 2)
-                s += "\n" # for good measure
-                if i:
-                    proof_so_far = i + '\n' + proof_so_far
+            case ANDNode(proof_step=s):
+                # !!TODO: check how to deal with these
+                #if node.parents:
+                #    # Unless the current node is the root,
+                #    # the tactic here needs to be indented
+                #    # TODO: check my assumption that all lines are indented by 2
+                #    s = standardize_indentation(s, 2)
+                #s += "\n" # for good measure
                 proof_so_far += s
             case ORNode(goal=g):
                 def disable_descendants_with_goal(node: Node, goal: Goal) -> None:
@@ -241,8 +240,8 @@ def find(
             case _:
                 raise TypeError(f"Unknown node type: {type(node)}")
         
-        logger.debug("Costs of children:\n" +\
-            '\n'.join(f"{str(child)} has cost estimate {estimate(child)}" for child in node.children)
+        logger.debug("AOStar cost estimates of children:\n" +\
+            '\n'.join(f"{str(child)}: {estimate(child)}" for child in node.children)
         )
 
         best_child = min(node.active_children, key=estimate)
@@ -294,25 +293,26 @@ def ao_star(
     try:
         while root.state == NodeState.ACTIVE:
             find(root, "", estimate, prompter, verifier, logger)
-            # Trick to prevent the saving process from being interrupted by KeyboardInterrupt
-            # Found at https://stackoverflow.com/a/842567
             if dump_checkpoint_path:
+                # Trick to prevent the saving process from being interrupted by KeyboardInterrupt
+                # Found at https://stackoverflow.com/a/842567
                 save_thread = Thread(target=serialize_tree, args=(root, dump_checkpoint_path))
                 save_thread.start()
                 save_thread.join()
             if present_search_tree_ANSI_file_path:
                 with open(present_search_tree_ANSI_file_path, 'w') as f:
                     f.write(present_search_tree(root, style = 'ANSI'))
-                if present_search_tree_HTML_file_path:
-                    with open(present_search_tree_HTML_file_path, 'w') as f:
-                        f.write(present_search_tree(root, style = 'HTML'))
+            if present_search_tree_HTML_file_path:
+                with open(present_search_tree_HTML_file_path, 'w') as f:
+                    f.write(present_search_tree(root, style = 'HTML'))
     except KeyboardInterrupt:
         logger.info("Proof search interrupted by user.")
     except CostCircuitBreak as e:
         logger.info(str(e))
     except BaseException:
         logger.error(traceback.format_exc())
-    # Whether or not we had an exception, go on to print the proof search tree and other stats
+    # Whether or not we had an exception,
+    # go on to print the proof search tree and other stats
 
     proof_str = ""
     match root.state:
@@ -362,26 +362,22 @@ def calculate_expansion_rate(root: Node) -> float:
 
     return compiling_count / expanded_count
 
-def collect_solution(node: Node, proof_so_far: str) -> str:
+def collect_solution(node: Node, proof_so_far: ProofSegment) -> ProofSegment:
+    # !!! TODO: rewrite proof_so_far to be ProofSegment
     assert node.solved, f"{node=} is not solved"
     match node:
-        case ANDNode(proof_step=proof_step, imports=imports):
-            if node.parents:
-                # Unless the current node is the root,
-                # the tactic here needs to be indented
-                # TODO: check my assumption that all lines are indented by 4
-                imports = standardize_indentation(imports, 0)
-                proof_step = standardize_indentation(proof_step, 4)
-                proof_str = imports + '\n' + proof_so_far + proof_step + '\n'
-                for child in node.children:
-                    proof_str = collect_solution(child, proof_str)
-                    # The recursive call will check the children are each solved
-            else: # root Node
-                proof_str = imports + proof_so_far + proof_step + '\n'
-                for child in node.children:
-                    proof_str = collect_solution(child, proof_str)
-                    # The recursive call will check the children are each solved
-                proof_str += "end"
+        case ANDNode(proof_step=proof_step):
+            # !!TODO: reconsider how to deal with indentation
+            ## Unless the current node is the root,
+            ## the tactic here needs to be indented
+            #proof_step = standardize_indentation(proof_step, 4)
+            proof = proof_so_far
+            for child in node.children:
+                proof = collect_solution(child, proof)
+                # The recursive call will check the children are each solved
+            if not node.parents: # root Node
+                # !!TODO: reconsider end
+                proof += "end"
         case ORNode(_):
             proof_str = proof_so_far
             properly_settled = False
