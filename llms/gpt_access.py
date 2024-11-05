@@ -51,6 +51,13 @@ gpt_model_info ={
         "request_limit_per_min": 500,
         "max_token_per_prompt": int(1.2*10**5) # less than 128k because additional tokens are added at times
     },
+    "gpt-3.5-turbo-instruct": { # Copying from gpt-3.5-turbo, but not really sure
+        "cents_per_1M_prompt_tokens": 150,
+        "cents_per_1M_completion_tokens": 200,
+        "token_limit_per_min": 200_000, 
+        "request_limit_per_min" : 3_500, 
+        "max_token_per_prompt" : int(3.75*2**10) # less than 4k because additional tokens are added at times
+    },
 }
 
 messages_skeleton = [
@@ -70,11 +77,41 @@ class GptAccess(LLMAccess):
         budget_in_cents: int = 100,
         secret_filepath: str = ".secrets/openai_key.json"
     ) -> None:
+        assert model_name in gpt_model_info, f"Model name {model_name} not supported"
         super().__init__(model_name=model_name, budget_in_cents=budget_in_cents)
         assert secret_filepath.endswith(".json"), "Secret filepath must be a .json file"
         assert os.path.exists(secret_filepath), "Secret filepath does not exist"
         self.secret_filepath = secret_filepath
         self._load_secret()
+
+    def _load_secret(self) -> None:
+        with open(self.secret_filepath, "r") as f:
+            secret = json.load(f)
+            # openai.organization = secret["organization"]
+            openai.api_key = secret["api_key"]
+        pass
+
+    def complete(self,
+        prompt: str,
+        max_tokens: int = 100
+    ) -> str:
+        if self.model_name == "gpt-3.5-turbo-instruct":
+            resp = self.complete_prompt(
+                prompt = prompt,
+                max_tokens = max_tokens,
+                stop = ["\0"]
+            )
+            return resp[0][0]
+        else: # No complete_prompt capability, emulate using complete_chat
+            messages = copy.deepcopy(messages_skeleton)
+            messages[0]["content"] = "Complete the following text."
+            messages[1]["content"] = prompt
+            resp = self.complete_chat(
+                messages = messages,
+                max_tokens = max_tokens,
+                stop = ["\0"]
+            )
+            return resp[0][0]["content"]
 
     def complete_prompt(self, 
         prompt: str, 
@@ -110,6 +147,7 @@ class GptAccess(LLMAccess):
         resp.sort(key=lambda x: x[1], reverse=True)
         return resp
 
+    # [[maybe_unused]]
     def complete_chat(self,
             messages: typing.List[str],
             n: int = 1,
@@ -164,53 +202,29 @@ class GptAccess(LLMAccess):
                 "Terminating the program so that costs don't go out of hand."
             )
 
-    def _load_secret(self) -> None:
-        with open(self.secret_filepath, "r") as f:
-            secret = json.load(f)
-            # openai.organization = secret["organization"]
-            openai.api_key = secret["api_key"]
-        pass
-
 if __name__ == "__main__":
     os.chdir(root_dir)
-    openai_access = GptAccess(model_name="gpt-3.5-turbo-0125")
     # openai_access = GptAccess(model_name="gpt-4")
+    # openai_access = GptAccess(model_name="gpt-3.5-turbo-0125")
     # openai_access = GptAccess(model_name="davinci")
-    # print(openai_access.get_models())
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful, pattern-following assistant that translates corporate jargon into plain English.",
-        },
-        {
-            "role": "system",
-            "name": "example_user",
-            "content": "New synergies will help drive top-line growth.",
-        },
-        {
-            "role": "system",
-            "name": "example_assistant",
-            "content": "Things working well together will increase revenue.",
-        },
-        {
-            "role": "system",
-            "name": "example_user",
-            "content": "Let's circle back when we have more bandwidth to touch base on opportunities for increased leverage.",
-        },
-        {
-            "role": "system",
-            "name": "example_assistant",
-            "content": "Let's talk later when we're less busy about how to do better.",
-        },
-        {
-            "role": "user",
-            "content": "This late pivot means we don't have time to boil the ocean for the client deliverable.",
-        },
-        {
-            "role": "user",
-            "content": "Our idea seems to be scooped, don't know how to change direction now."
-        }
-    ]
-    print("printing complete chat:")
-    print(openai_access.complete_chat(messages, max_tokens=15, n=2, temperature=0.8))
+    prompt = r'''/-- This is a complete Lean 4 proof written by an expert,
+interspersed with thoughts kept as comments. --/
+import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+/-- The second and fourth terms of a geometric sequence are $2$ and $6$. Which of the following is a possible first term?
+Show that it is $\frac{2\sqrt{3}}{3}$.-/
+theorem amc12b_2003_p6 (a r : ℝ) (u : ℕ → ℝ) (h₀ : ∀ k, u k = a * r ^ k) (h₁ : u 1 = 2)
+  (h₂ : u 3 = 6) : u 0 = 2 / Real.sqrt 3 ∨ u 0 = -(2 / Real.sqrt 3) := by
+'''
+
+    for model_name in ["gpt-3.5-turbo-instruct", "gpt-4o-mini", "gpt-4o"]:
+        openai_access = GptAccess(model_name)
+        print(f"Asking {model_name} with {prompt=}")
+        print("\nResponse:")
+        print(openai_access.complete(prompt))
     pass

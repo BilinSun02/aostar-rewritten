@@ -1,6 +1,6 @@
 from typing import List, Tuple
 from abc import ABC, abstractmethod
-from gpt_access import GptAccess
+#from gpt_access import GptAccess
 from dataclasses import dataclass, field
 import re
 
@@ -20,6 +20,21 @@ class LLMAccess(ABC):
             "completion_tokens": 0,
             "total_tokens": 0
         }
+
+    @abstractmethod
+    def complete(self,
+        prompt: str,
+        max_tokens: int = 100
+    ) -> str:
+        """
+        Text prediction: given prompt, predict text following
+        the prompt until the predicted end of the contents.
+        Note that this is similar to `openai.Completion` and
+        *not* openai.ChatCompletion.
+        If a model does not support text prediction, it's on
+        the write of the LLMAccess subclass to "emulate" it.
+        """
+        pass
 
 @dataclass
 class GPTPrompter:
