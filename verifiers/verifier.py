@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import NamedTuple, List, Optional, Type
 from abc import ABC, abstractmethod
-from .language import VerifierLanguage
+from .language import LanguageServer
 
 @dataclass
 class Message:
@@ -47,7 +47,7 @@ EmptyResult = VerificationResult()
 class Verifier(ABC):
     # Every field defaulting to NotImplemented
     # should be overridden in any "non-abstract" subclass
-    language_T: Type[VerifierLanguage] = NotImplemented
+    language_T: Type[LanguageServer] = NotImplemented
 
     def __init__(self):
         if self.language == NotImplemented:

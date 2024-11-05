@@ -6,7 +6,8 @@ from data_structures import *
 from verifiers.verifier import Verifier
 from verifiers.lean3 import Lean3Verifier
 from search_tree_visualization import present_search_tree
-from prompt_gpt import GPTPrompter, GPTCircuitBreak
+#from prompt_gpt import GPTPrompter, CostCircuitBreak
+from llms.common import CostCircuitBreak
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -310,7 +311,7 @@ def ao_star(
                         f.write(present_search_tree(root, style = 'HTML'))
     except KeyboardInterrupt:
         logger.info("Proof search interrupted by user.")
-    except GPTCircuitBreak as e:
+    except CostCircuitBreak as e:
         logger.info(str(e))
     except BaseException:
         logger.error(traceback.format_exc())

@@ -2,86 +2,82 @@
 # Uses deprecated OpenAI <1.0.0 APIs
 # Adapted from the copra codebase
 
-import sys
+import sys, os
 root_dir = f"{__file__.split('gpt_access')[0]}"
 if root_dir not in sys.path:
     sys.path.append(root_dir)
-import os
 import json
 import openai
 import typing
-import tiktoken
-import logging
+from .common import LLMAccess, CostCircuitBreak
+import copy
 
-class GptAccess(object):
-    gpt_model_info ={
-        "gpt-3.5-turbo": {
-            "token_limit_per_min": 45000, 
-            "request_limit_per_min" : 3400, 
-            "max_token_per_prompt" : int(3.75*2**10) # less than 4k because additional tokens are added at times
-        },
-        "gpt-4": {
-            "token_limit_per_min": 20000,
-            "request_limit_per_min": 100,
-            "max_token_per_prompt": int(7.75*2**10) # less than 8k because additional tokens are added at times
-        },
-        "gpt-4-0314": {
-            "token_limit_per_min": 20000,
-            "request_limit_per_min": 100,
-            "max_token_per_prompt": int(7.75*2**10) # less than 8k because additional tokens are added at times
-        },
-        "gpt-4-0613": {
-            "token_limit_per_min": 20000,
-            "request_limit_per_min": 100,
-            "max_token_per_prompt": int(7.75*2**10) # less than 8k because additional tokens are added at times
-        },
-        "gpt-4-1106-preview": {
-            "token_limit_per_min": 150000,
-            "request_limit_per_min": 20,
-            "max_token_per_prompt": int(1.2*10**5) # less than 128k because additional tokens are added at times
-        },
-        'codellama/CodeLlama-7b-Instruct-hf': {
-            "token_limit_per_min": 10**6,
-            "request_limit_per_min": 10**6,
-            "max_token_per_prompt": int(13.75*2**10) # less than 16k because additional tokens are added at times
-        },
-        'EleutherAI/llemma_7b': {
-            "token_limit_per_min": 10**6,
-            "request_limit_per_min": 10**6,
-            "max_token_per_prompt": int(13.75*2**10) # less than 16k because additional tokens are added at times
-        },
-        'morph-labs/morph-prover-v0-7b': {
-            "token_limit_per_min": 10**6,
-            "request_limit_per_min": 10**6,
-            "max_token_per_prompt": int(13.75*2**10) # less than 16k because additional tokens are added at times            
-        }
-    }
+# Data from https://openai.com/api/pricing/
+# and from https://platform.openai.com/docs/guides/rate-limits/usage-tiers?context=tier-two
+# Accurate as of Nov 4, 2024
+gpt_model_info ={
+    "gpt-3.5-turbo-0125": {
+        "cents_per_1M_prompt_tokens": 50,
+        "cents_per_1M_completion_tokens": 150,
+        "token_limit_per_min": 200_000, 
+        "request_limit_per_min" : 3_500, 
+        "max_token_per_prompt" : int(3.75*2**10) # less than 4k because additional tokens are added at times
+    },
+    "gpt-4": {
+        "cents_per_1M_prompt_tokens": 3000,
+        "cents_per_1M_completion_tokens": 6000,
+        "token_limit_per_min": 10_000,
+        "request_limit_per_min": 500,
+        "max_token_per_prompt": int(7.75*2**10) # less than 8k because additional tokens are added at times
+    },
+    "gpt-4-turbo": {
+        "cents_per_1M_prompt_tokens": 1000,
+        "cents_per_1M_completion_tokens": 3000,
+        "token_limit_per_min": 30_000,
+        "request_limit_per_min": 500,
+        "max_token_per_prompt": int(7.75*2**10) # less than 8k because additional tokens are added at times
+    },
+    "gpt-4o": {
+        "cents_per_1M_prompt_tokens": 250,
+        "cents_per_1M_completion_tokens": 1000,
+        "token_limit_per_min": 30_000,
+        "request_limit_per_min": 500,
+        "max_token_per_prompt": int(7.75*2**10) # less than 8k because additional tokens are added at times
+    },
+    "gpt-4o-mini": {
+        "cents_per_1M_prompt_tokens": 15,
+        "cents_per_1M_completion_tokens": 60,
+        "token_limit_per_min": 200_000,
+        "request_limit_per_min": 500,
+        "max_token_per_prompt": int(1.2*10**5) # less than 128k because additional tokens are added at times
+    },
+}
+
+messages_skeleton = [
+    {
+        "role": "system",
+        "content": ""
+    },
+    {
+        'role': 'user',
+        'content': ""
+    },
+]
+
+class GptAccess(LLMAccess):
     def __init__(self, 
-        secret_filepath: str = ".secrets/openai_key.json",
-        model_name: typing.Optional[str] = None) -> None:
+        model_name: str,
+        budget_in_cents: int = 100,
+        secret_filepath: str = ".secrets/openai_key.json"
+    ) -> None:
+        super().__init__(model_name=model_name, budget_in_cents=budget_in_cents)
         assert secret_filepath.endswith(".json"), "Secret filepath must be a .json file"
         assert os.path.exists(secret_filepath), "Secret filepath does not exist"
         self.secret_filepath = secret_filepath
         self._load_secret()
-        self.models_supported = openai.Model.list().data
-        self.models_supported_name = [model.id for model in self.models_supported]
-        if model_name is not None:
-            assert model_name in self.models_supported_name, f"Model name {model_name} not supported"
-            self.model_name = model_name
-        self.is_open_ai_model = True
-        self.usage = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0
-        }
-        pass
 
-    def get_models(self) -> list:
-        return self.models_supported
-    
     def complete_prompt(self, 
         prompt: str, 
-        model: typing.Optional[str] = None,
         n: int = 1, 
         max_tokens: int = 5, 
         temperature: float = 0.25, 
@@ -90,9 +86,8 @@ class GptAccess(object):
         presence_penalty: float = 0.0, 
         stop: list = ["\n"],
         logprobs: int = 0) -> typing.List[typing.Tuple[str, float]]:
-        model = self.model_name if model is None else model
         response = openai.Completion.create(
-            model=model,
+            model=self.model_name,
             prompt=prompt,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -104,18 +99,19 @@ class GptAccess(object):
             logprobs=logprobs
             # best_of=n
         )
-        if self.is_open_ai_model:
-            usagae = response.usage
-            self.usage["prompt_tokens"] += usagae.prompt_tokens
-            self.usage["completion_tokens"] += usagae.completion_tokens
-            self.usage["total_tokens"] += usagae.total_tokens        
+        usage = response.usage
+        self.usage["prompt_tokens"] += usage.prompt_tokens
+        self.usage["completion_tokens"] += usage.completion_tokens
+        self.usage["total_tokens"] += usage.total_tokens        
+        self.cost_in_cents += int(usage.prompt_tokens * gpt_model_info[self.model_name]["cents_per_1M_prompt_tokens"] / 1000000)
+        self.cost_in_cents += int(usage.completion_tokens * gpt_model_info[self.model_name]["cents_per_1M_completion_tokens"] / 1000000)
+
         resp = [(obj.text, sum(obj.logprobs.token_logprobs)) for obj in response.choices]
         resp.sort(key=lambda x: x[1], reverse=True)
         return resp
 
     def complete_chat(self,
             messages: typing.List[str],
-            model: typing.Optional[str] = None,
             n: int = 1,
             max_tokens: int = 25,
             # temperature: float = 0.25, # TODO: verify again if a high temperature is indeed needed
@@ -124,49 +120,29 @@ class GptAccess(object):
             frequency_penalty: float = 0.0,
             presence_penalty: float = 0.0,
             stop: list = ["\n"]) -> typing.Tuple[list, dict]:
-        model = self.model_name if model is None else model
-        if self.is_open_ai_model:
-            # TODO: only uses the first and the last message for now, ignoring all the example messages as they do not accurately generate multiple tactics in one go
-            messages_temp = [messages[0], messages[-1]]
-            # logger = logging.getLogger("__main__")
-            
+        self.check_budget()
+        response = openai.ChatCompletion.create(
+            model=self.model_name,
+            messages=messages,
+            # messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            # stop=stop,
+            n=n
+        )
+        usage = response.usage
+        self.usage["prompt_tokens"] += usage.prompt_tokens
+        self.usage["completion_tokens"] += usage.completion_tokens
+        self.usage["total_tokens"] += usage.total_tokens
+        self.cost_in_cents += int(usage.prompt_tokens * gpt_model_info[self.model_name]["cents_per_1M_prompt_tokens"] / 1000000)
+        self.cost_in_cents += int(usage.completion_tokens * gpt_model_info[self.model_name]["cents_per_1M_completion_tokens"] / 1000000)
+        # The actual cost is slightly higher:
+        # The name of the user etc. also count towards the tokens.
+        # See here for more details: https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
 
-            # logger.info(f"using temperature: {temperature}")
-            # logger.info(f"using frequency_penalty: {frequency_penalty}")
-            # logger.info(f"using presence_penalty: {presence_penalty}")
-            # logger.info(f"using top-p: {top_p}")
-
-            # print("using temporary messages for multiple responses: ", messages_temp)
-            response = openai.ChatCompletion.create(
-                model=model,
-                messages=messages_temp,
-                # messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-                # stop=stop,
-                n=n
-            )
-            usage = response.usage
-            self.usage["prompt_tokens"] += usage.prompt_tokens
-            self.usage["completion_tokens"] += usage.completion_tokens
-            self.usage["total_tokens"] += usage.total_tokens
-        else:
-            response = openai.ChatCompletion.create(
-                model=model,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                # top_p=top_p,
-                stop=stop,
-                n=n
-            )
-            usage = response.usage
-            self.usage["prompt_tokens"] += usage.prompt_tokens
-            self.usage["completion_tokens"] += usage.completion_tokens
-            self.usage["total_tokens"] += usage.total_tokens
         return_responses = [{"role": choice.message.role, "content": choice.message.content} for choice in response.choices]
         for i in range(len(return_responses) - 1):
             return_responses[i]["finish_reason"] = "stop"
@@ -180,47 +156,13 @@ class GptAccess(object):
         }
         return return_responses, usage_dict
     
-    def num_tokens_from_messages(self, messages, model=None):
-        # Model name is like "gpt-3.5-turbo-0613"
-        model = model if model is not None else self.model_name
-        """Return the number of tokens used by a list of messages."""
-        try:
-            encoding = tiktoken.encoding_for_model(model)
-        except KeyError:
-            print("Warning: model not found. Using cl100k_base encoding.")
-            encoding = tiktoken.get_encoding("cl100k_base")
-        if model in {
-            "gpt-3.5-turbo-0613",
-            "gpt-3.5-turbo-16k-0613",
-            "gpt-4-0314",
-            "gpt-4-32k-0314",
-            "gpt-4-0613",
-            "gpt-4-32k-0613",
-        }:
-            tokens_per_message = 3
-            tokens_per_name = 1
-        elif model == "gpt-3.5-turbo-0301":
-            tokens_per_message = 4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
-            tokens_per_name = -1  # if there's a name, the role is omitted
-        elif "gpt-3.5-turbo" in model:
-            #print("Warning: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
-            return self.num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613")
-        elif "gpt-4" in model: #TODO: is this true of gpt-4o?
-            #print("Warning: gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
-            return self.num_tokens_from_messages(messages, model="gpt-4-0613")
-        else:
-            raise NotImplementedError(
-                f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens."""
+    def check_budget(self):
+        if self.cost_in_cents > self.budget_in_cents:
+            raise CostCircuitBreak(
+                f"LLM token count reached {self.usage['total_tokens']}, "
+                f"incurring a cost of {self.cost_in_cents} cents. "
+                "Terminating the program so that costs don't go out of hand."
             )
-        num_tokens = 0
-        for message in messages:
-            num_tokens += tokens_per_message
-            for key, value in message.items():
-                num_tokens += len(encoding.encode(value))
-                if key == "name":
-                    num_tokens += tokens_per_name
-        num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
-        return num_tokens
 
     def _load_secret(self) -> None:
         with open(self.secret_filepath, "r") as f:
@@ -229,12 +171,9 @@ class GptAccess(object):
             openai.api_key = secret["api_key"]
         pass
 
-    def get_usage(self) -> dict:
-        return self.usage
-
 if __name__ == "__main__":
     os.chdir(root_dir)
-    openai_access = GptAccess(model_name="gpt-3.5-turbo")
+    openai_access = GptAccess(model_name="gpt-3.5-turbo-0125")
     # openai_access = GptAccess(model_name="gpt-4")
     # openai_access = GptAccess(model_name="davinci")
     # print(openai_access.get_models())

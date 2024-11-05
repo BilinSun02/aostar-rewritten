@@ -23,7 +23,7 @@ class ProofSegment(ABC):
     def __str__(self) -> str:
         pass
 
-class VerifierLanguage[ProofSegment_T: ProofSegment](ABC):
+class LanguageServer[ProofSegment_T: ProofSegment](ABC):
     # Every field defaulting to NotImplemented
     # should be overridden in any "non-abstract" subclass
     language_name: str = NotImplemented # Name in natural language

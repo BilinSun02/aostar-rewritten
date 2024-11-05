@@ -1,5 +1,5 @@
 # Running the AO* proof search algorithm
-The minimal necessary requirements.txt will be supplied later, but the conda & lean setup for copra suffices. Also put your OpenAI keys in `.secrets/openai_key.json`. Run
+The minimal necessary requirements.txt will be supplied later, but the conda & lean setup for copra suffices. Also put your OpenAI keys in `llms/.secrets/openai_key.json`. Run
 ```bash
 leanpkg configure
 leanpkg build
