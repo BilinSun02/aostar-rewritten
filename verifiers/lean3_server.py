@@ -4,20 +4,31 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Lean3ProofSegment(ProofSegment):
-    body: str
-    necessary_import: str = None
+    tactics: str
+    imports: str = None
     # Had to sidestep the `import` keyword of Python ;-)
 
     def __add__(self, other: 'Lean3ProofSegment') -> 'Lean3ProofSegment':
         # Concatenate two proof steps together into one proof step.
         assert isinstance(other, Lean3ProofSegment)
-        return Lean3ProofSegment(
-            self.body + other.body,
-            self.necessary_import + other.necessary_import
-        )
+
+        if self.imports and self.imports.endswith('\n'):
+            imports = self.imports + other.imports
+        else:
+            imports = self.imports + '\n' + other.imports
+
+        if self.tactics and self.tactics.endswith('\n'):
+            tactics = self.tactics + other.tactics
+        else:
+            tactics = self.tactics + '\n' + other.tactics
+
+        return Lean3ProofSegment(tactics, imports)
 
     def __str__(self) -> str:
-        return self.necessary_import + self.body
+        return self.imports + self.tactics
+
+    def indicates_abandonment(self) -> bool:
+        return "sorry" in self.tactics
 
 class Lean3Server(LanguageServer[Lean3ProofSegment]):
     language_name: str = "Lean 3"
@@ -25,9 +36,11 @@ class Lean3Server(LanguageServer[Lean3ProofSegment]):
 
     @classmethod
     def complete_proof(self, proof_segment: Lean3ProofSegment) -> str:
-        # There's nothing to do for Lean 3: `lean` will happily run
-        # an incomplete proof.
-        return str(proof_segment)
+        # `lean` will happily run an incomplete proof.
+        # In fact, we need to remove "end"s at the end
+        # to get useful goal information.
+        proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
+        return self.remove_end_line(proof_str)
 
     @staticmethod
     def remove_end_line(string:str) -> str:
@@ -41,15 +54,6 @@ class Lean3Server(LanguageServer[Lean3ProofSegment]):
 
     # !!TODO: implement predict_proof_step
     def predict_proof_step(self, proof_segment: Lean3ProofSegment) -> str:
-
-        messages = copy.deepcopy(messages_skeleton)
-        messages[0]["content"] = prompt_message_introduction
-        if self.include_input_format_prompt:
-            messages[0]["content"] += prompt_message_input_format
-        if self.think_aloud:
-            messages[0]["content"] += prompt_message_output_format_with_thoughts
-        else:
-            messages[0]["content"] += prompt_message_output_format_wo_thoughts
         messages[0]["content"] += prompt_message_token_limit
         messages[1]["content"] = goals + avoid_steps
         raise NotImplementedError

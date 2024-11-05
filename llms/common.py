@@ -32,10 +32,12 @@ class LLMAccess(ABC):
         Note that this is similar to `openai.Completion` and
         *not* openai.ChatCompletion.
         If a model does not support text prediction, it's on
-        the write of the LLMAccess subclass to "emulate" it.
+        the write of the LLMAccess subclass to "emulate" it,
+        e.g. by wrapping it in a "chat" completion session.
         """
         pass
 
+# !!TODO: change references to singular "tactic" to "tactics"
 @dataclass
 class GPTPrompter:
     gpt_token_counter: float = field(default=0.0, init=False)
@@ -55,9 +57,9 @@ class GPTPrompter:
         """
         `goals` should furnish the [GOALS] section
         `avoid_steps` should furnish the [AVOID STEPS] section
-        Returns a list of (`tactic`, `necessary_import`) pairs suggested by the LLM.
+        Returns a list of (`tactic`, `imports`) pairs suggested by the LLM.
         Each `tactic` should compile when appended to the existing proof
-        once we prepend the `necessary_import` to the existing proof
+        once we prepend the `imports` to the existing proof
         """
         if self.n_tactics != 1:
             raise NotImplementedError("It's not currently supported to prompt for more than one tactic at a time.") # TODO: implement this.
@@ -91,13 +93,13 @@ class GPTPrompter:
                 tactics_with_imports = re.findall(pattern, gpt_message_str, re.DOTALL)
                 # `tactics_with_imports` is the list of tuples almost meeting the docstring's need
                 # We will only need to doctor the tactics a bit
-                for thoughts, tactic, necessary_import in tactics_with_imports:
+                for thoughts, tactic, imports in tactics_with_imports:
                     if self.think_aloud:
                         print(thoughts+'\n\n') # TODO: return this to the caller, not just print out
                     # Sometimes GPT thinks it's done and puts `end`
                     # However, that would break our program, as our program furnishes an `end` automatically
                     tactic = remove_end_line(tactic)
-                    gpt_tactics.append((tactic, necessary_import))
+                    gpt_tactics.append((tactic, imports))
                     avoid_steps += "[STEP]" + tactic + "\n"
                     avoid_steps += "[ERROR]This tactic has been suggested by others. You should come up with a novel tactic.[END ERROR]\n"
                     messages[1]["content"] = goals + avoid_steps

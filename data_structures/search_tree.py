@@ -4,6 +4,7 @@ from typing import Optional, List
 from enum import Enum, auto
 
 from verifiers.verifier import Message, Goal
+from verifiers.language import ProofSegment
 
 class NodeState(Enum):
     ACTIVE = auto()
@@ -111,12 +112,11 @@ class ANDNode(Node):
     '''
     An AND node itself is a child of an OR node, and so represents a proof step.
     '''
-    proof_step: str # One or more tactics
-    necessary_import: str = field(default="") # E.g. additional necessary imports for tactics
+    proof_step: ProofSegment
     error_messages: List[Message] = field(default_factory=list, init=False) # Nonempty if the tactic failed to compile
 
     def __str__(self) -> str:
-        return self.proof_step + " " + self.necessary_import
+        return str(self.proof_step)
 
     def __eq__(self, other: Node) -> bool:
         if not isinstance(other, ANDNode):
@@ -125,16 +125,13 @@ class ANDNode(Node):
         # For motivation, see comments for Node.__eq__
         return Node.__eq__(self, other) and self.proof_step == other.proof_step
         
-    def proof_so_far(self, path: List['Node']) -> str:
+    def proof_so_far(self, path: List['Node']) -> ProofSegment:
         assert path[-1] is self   
         if len(path) > 1:
             assert path[-2] in self.parents
-            return (self.necessary_import + '\n' if self.necessary_import else "") +\
-                path[-2].proof_step + '\n' + \
-                self.proof_step
+            return path[-2].proof_step + self.proof_step
         else:
-            return (self.necessary_import + '\n' if self.necessary_import else "") +\
-                self.proof_step
+            return self.proof_step
 
 @dataclass
 class AbandonedANDNode(ANDNode):
@@ -186,21 +183,22 @@ class MERISTEMNode(Node):
 
     @property
     def avoid_steps_str(self) -> str:
-        avoid_steps_str = "[AVOID STEPS]\n"
+        avoid_steps_str = "Some steps I plan not to use:\n"
         for peer in self.parent_OR_node.children:
             if isinstance(peer, ANDNode):
-                avoid_steps_str += "[STEP]" + peer.proof_step + "\n[ERROR]" # This is technically missing the import part, but close enough
-                if peer.error_messages:
-                    avoid_steps_str += "\n".join(msg.text for msg in peer.error_messages)
-                elif peer.detailed_state == NodeDetailedState.IS_REPETITIVE:
-                    avoid_steps_str += "You have repeatedly suggested this tactic. Do NOT suggest it again."
-                elif peer.detailed_state == NodeDetailedState.NO_PROGRESS:
-                    avoid_steps_str += "This tactic compiles fine but leads to an undesirable goal. " +\
-                                       "Usually this means this tactic (or this tactic together with further steps) " +\
-                                       "lead to exactly the same goal as where it started, i.e. no progress is made."
-                else:
-                    avoid_steps_str += "This tactic is known. You are tasked to come up with a novel tactic."
-                avoid_steps_str += "[END ERROR]\n"
+                avoid_steps_str += "[STEP]" + peer.proof_step
+                avoid_steps_str += "[REASON]" + {
+                    NodeDetailedState.DOESNT_COMPILE:
+                        "\n".join(msg.text for msg in peer.error_messages),
+                    NodeDetailedState.IS_REPETITIVE:
+                        "I've repeatedly suggested this which doesn't work. "+\
+                        "I should try something else.",
+                    NodeDetailedState.NO_PROGRESS:
+                        "This tactic compiles fine but leads to a futile goal."
+                }.get(peer.detailed_state, "This step is known to fail.")
+                # TODO: "This step is known to fail." could be improved.
+                # E.g. when peer.detailed_state == FAILED_DUE_TO_CHILDREN,
+                # we could add how the children failed.
         return avoid_steps_str
 
     def __eq__(self, other: Node) -> bool:
@@ -209,7 +207,7 @@ class MERISTEMNode(Node):
         return Node.__eq__(self, other)
     
     def proof_so_far(self, path: List['Node']) -> str:
-        raise NotImplementedError("Not implemented for MERISTEM nodes")
+        raise NotImplementedError("N/A for MERISTEM nodes")
 
 @dataclass
 class ORNode(Node):

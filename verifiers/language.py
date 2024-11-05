@@ -11,7 +11,7 @@ class ProofSegment(ABC):
 
     @abstractmethod
     def __add__(self, other: 'ProofSegment') -> 'ProofSegment':
-        # Concatenate two proof steps together into one proof step.
+        #Concatenate two proof steps together into one proof step.
         assert isinstance(other, ProofSegment)
         pass
 
@@ -21,6 +21,21 @@ class ProofSegment(ABC):
     
     @abstractmethod
     def __str__(self) -> str:
+        """
+        Intended to return a human readable format.
+        NOT guaranteed to be directly runnable on the verifier.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def indicates_abandonment(self) -> bool:
+        """
+        The prompt may allow the proof predictor to abanson the
+        current proof state (e.g. if the predictor realizes the
+        state is unprovable) by outputing specific outputs (e.g.
+        `sorry` for Lean 3 and 4).
+        """
         pass
 
 class LanguageServer[ProofSegment_T: ProofSegment](ABC):
@@ -43,7 +58,10 @@ class LanguageServer[ProofSegment_T: ProofSegment](ABC):
 
     #@classmethod
     #@abstractmethod
-    #def predict_proof_step(cls, proof: str) -> ProofSegment_T:
+    #def predict_proof_step(cls,
+    #    proof: str,
+    #    comment: str
+    #) -> ProofSegment_T:
     #    """
     #    Interact with model to predict the next proof step.
     #    """

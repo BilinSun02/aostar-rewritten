@@ -4,7 +4,8 @@ from threading import Thread
 
 from data_structures import *
 from verifiers.verifier import Verifier
-from verifiers.lean3 import Lean3Verifier
+from verifiers.lean3_verifier import Lean3Verifier
+from verifiers.language import ProofSegment
 from search_tree_visualization import present_search_tree
 #from prompt_gpt import GPTPrompter, CostCircuitBreak
 from llms.common import CostCircuitBreak
@@ -88,7 +89,7 @@ def backtrack(
     for parent in node.parents:
         if not any(parent is tup[0] for tup in nodes_history): # Without this check, we may not only duplicate the parent, but worse yet run into infinite recursions due to loops
             backtrack(parent, logger, nodes_history) # nodes_history is mutated during this call
-    
+
     return nodes_history
 
 def expand(
@@ -103,7 +104,7 @@ def expand(
         node.expanded = True
 
     match node:
-        case ANDNode(proof_step=p, necessary_import=n):
+        case ANDNode(proof_step=p, imports=n):
             node.expanded = True
 
             proof_to_run = n + "\n" + proof_so_far + standardize_indentation(p) + "\nend"
@@ -138,7 +139,7 @@ def expand(
                                 if result is not None:
                                     return result
                         return None
-                    
+
                     def exists_path(orig: Node, dest: Node, without: Node) -> bool:
                         assert orig in dest.ancestors, f"Node {orig} is not an ancestor of {dest}"
                         if dest is orig:
@@ -159,44 +160,40 @@ def expand(
             assert not node.expanded, f"Node {node} has already been expanded"
             # We do NOT mark MERISTEM nodes as expanded
 
-            message = "[PROOF]\n" + proof_so_far + '\n'
-            message += "[GOALS]\n" + p.goal.format_message() # !!!TODO: see what to put
+            # !!!TODO: see what to put
             print_friendly_avoid_steps_str = str(a).replace('\n', '\\n')
-            logger.info(f"Prompting for tactics with {message=} with cautions {print_friendly_avoid_steps_str}")
-            tactics_import_pairs_to_try = prompter.prompt_for_tactics(message, avoid_steps=a)
+            logger.info(f"Prompting for tactics with proof segment {p} " +\
+                        f"with cautions {print_friendly_avoid_steps_str}")
+            comment = "The current goal:\n" + p.goal.format_message() + "\n"
+            comment += "" + a # !!!! TODO: check how `a` was defined
+            proof_steps_to_try: List[ProofSegment] = prompter.prompt_for_tactics(proof_so_far, comment) # !!TODO: replace prompt_for_tactics with prompt_for_tactics
 
-            for tactic, necessary_import in tactics_import_pairs_to_try:
-                if "sorry" in tactic: # TODO: This hardcodes "sorry" to mean "the goal was abandoned". Un-hardcode this in the future if we need to use "sorry" in the future.
+            for proof_step in proof_steps_to_try:
+                if proof_step.indicates_abandonment: # TODO: This hardcodes "sorry" to mean "the goal was abandoned". Un-hardcode this in the future if we need to use "sorry" in the future.
                     logger.warning(f"The LLM decides to abandon the goal {p.goal}.")
-                    node.add_child(AbandonedANDNode(
-                        proof_step = tactic,
-                        necessary_import = necessary_import
-                    ))
+                    node.add_child(AbandonedANDNode(proof_step))
                     node.expanded = True
                     node.detailed_state = NodeDetailedState.ABANDONED
                     break
-                elif (tactic, necessary_import) in d:
-                    logger.warning(f"The LLM repeatedly produces {tactic=} despite instructions not to do so.")
-                    # Still create an AND node
-                    # so we can see at the end how many times the LLM repeats itself
-                    p.add_child(RepetitiveANDNode(
-                        proof_step = tactic,
-                        necessary_import = necessary_import
-                    ))
+                elif proof_step in d:
+                    logger.warning(f"The LLM repeatedly produces{proof_step=} "\
+                                   + "despite instructions not to do so.")
+                    # Still create an AND node, so that we can
+                    # see at the end how many times the LLM repeats itself
+                    p.add_child(RepetitiveANDNode(proof_step))
                 else:
                     # If we reach here, we have a distinct new tactic
                     # Let the LLM avoid suggesting the same tactic in the future
-                    d.append((tactic, necessary_import))
+                    d.append(proof_step)
 
-                    AND_peer = ANDNode(
-                        proof_step = tactic,
-                        necessary_import = necessary_import
-                    )
+                    AND_peer = ANDNode(proof_step)
                     p.add_child(AND_peer)
 
                     expand(AND_peer, proof_so_far, prompter, verifier, logger)
-                    # This is a nontrivial optimization--we expand AND nodes whenever they are created, rather than wait for `find()` to visit the AND node.
-                    # This is because expanding AND nodes is relatively cheap, involving only running Lean on the local machine.
+                    # This is an optimization--we expand AND nodes as soon as
+                    # they are created, rather than wait for `find()` to visit
+                    # the AND node. This is because expanding AND nodes is
+                    # relatively cheap, involving only running Lean.
                     # TODO: allow this to be turned off
         case _:
             raise TypeError(f"Unknown node type: {type(node)}")
@@ -217,7 +214,7 @@ def find(
     else:
         nodes_temporarily_marked_NO_PROGRESS = list()
         match node:
-            case ANDNode(proof_step=s, necessary_import=i):
+            case ANDNode(proof_step=s, imports=i):
                 if node.parents:
                     # Unless the current node is the root,
                     # the tactic here needs to be indented
@@ -286,7 +283,7 @@ def ao_star(
         theorem_statement += "\nbegin"
         root = ANDNode(
             proof_step = theorem_statement,
-            necessary_import = ""
+            imports = ""
         )
         root.root = root
         expand(root, "", prompter, verifier, logger)
@@ -368,19 +365,19 @@ def calculate_expansion_rate(root: Node) -> float:
 def collect_solution(node: Node, proof_so_far: str) -> str:
     assert node.solved, f"{node=} is not solved"
     match node:
-        case ANDNode(proof_step=proof_step, necessary_import=necessary_import):
+        case ANDNode(proof_step=proof_step, imports=imports):
             if node.parents:
                 # Unless the current node is the root,
                 # the tactic here needs to be indented
                 # TODO: check my assumption that all lines are indented by 4
-                necessary_import = standardize_indentation(necessary_import, 0)
+                imports = standardize_indentation(imports, 0)
                 proof_step = standardize_indentation(proof_step, 4)
-                proof_str = necessary_import + '\n' + proof_so_far + proof_step + '\n'
+                proof_str = imports + '\n' + proof_so_far + proof_step + '\n'
                 for child in node.children:
                     proof_str = collect_solution(child, proof_str)
                     # The recursive call will check the children are each solved
             else: # root Node
-                proof_str = necessary_import + proof_so_far + proof_step + '\n'
+                proof_str = imports + proof_so_far + proof_step + '\n'
                 for child in node.children:
                     proof_str = collect_solution(child, proof_str)
                     # The recursive call will check the children are each solved

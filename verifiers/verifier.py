@@ -21,7 +21,7 @@ class Goal(NamedTuple):
         for hypothesis in self.hypotheses:
             message_str += "[HYPOTHESIS] " + hypothesis
         return message_str
-    
+
     def __eq__(self, other: 'Goal'):
         if not isinstance(other, Goal):
             return False
