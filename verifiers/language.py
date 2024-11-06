@@ -2,12 +2,19 @@ from abc import ABC, abstractmethod
 from typing import Generic, TypeVar, Type
 from dataclasses import dataclass
 
+from llms.common import LLMAccess
+
 @dataclass(frozen=True)
 class ProofSegment(ABC):
     """
     A complete proof, the beginnig parts of a proof,
     or just a proof step.
     """
+
+    @classmethod
+    @abstractmethod
+    def empty_proof(cls) -> 'ProofSegment':
+        pass
 
     @abstractmethod
     def __add__(self, other: 'ProofSegment') -> 'ProofSegment':
@@ -38,36 +45,42 @@ class ProofSegment(ABC):
         """
         pass
 
-class LanguageServer[ProofSegment_T: ProofSegment](ABC):
+class VerifierLanguage(ABC):
     # Every field defaulting to NotImplemented
     # should be overridden in any "non-abstract" subclass
-    language_name: str = NotImplemented # Name in natural language
+    language_name: str = None # Name in natural language
+    proof_segment_type: Type[ProofSegment] = None
 
     def __init__(self):
-        if self.language_name == NotImplemented:
-            raise TypeError("Initializing a verifier language with no name.")
+        assert self.language_name is not None,\
+            "Initializing a verifier language with no name."
+        assert self.proof_segment_type is not None,\
+            "Initializing a verifier language without rules for" +\
+            " how to handle proof segments."
 
-    @classmethod
     @abstractmethod
-    def complete_proof(self, proof_segment: ProofSegment_T) -> str:
+    def complete_proof(self, proof_segment: ProofSegment) -> str:
         """
-        Given a proof segment, supply dummy parts (e.g. `sorry` 4), if
-        needed, to get a proof that can be run on the verifier.
+        Given a proof segment, supply dummy parts (e.g. `sorry` and `end`
+        in Lean), if needed, to get a proof that can be run on the verifier.
         """
         pass
 
-    #@classmethod
-    #@abstractmethod
-    #def predict_proof_step(cls,
-    #    proof: str,
-    #    comment: str
-    #) -> ProofSegment_T:
-    #    """
-    #    Interact with model to predict the next proof step.
-    #    """
-    #    pass
-    # !!TODO: consider the interface for this
-    # Presumably similar to GPTPrompter.prompt_for_tactics
+    @abstractmethod
+    def predict_proof_step(
+        self,
+        proof_segment: ProofSegment,
+        comment: str,
+        llm_access: LLMAccess
+    ) -> ProofSegment:
+        """
+        Interact with model to predict the next proof step.
+        `comment` is not expect to conform to the syntax of
+        the verifier language. Hence, it's the responsibility
+        of this function to possibly wrap it.
+        """
+        pass
+
 
 # Unit test code
 if __name__ == "__main__":

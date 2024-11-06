@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import NamedTuple, List, Optional, Type
 from abc import ABC, abstractmethod
-from .language import LanguageServer
+from .language import ProofSegment
 
 @dataclass
 class Message:
@@ -45,15 +45,6 @@ EmptyResult = VerificationResult()
 
 
 class Verifier(ABC):
-    # Every field defaulting to NotImplemented
-    # should be overridden in any "non-abstract" subclass
-    language_T: Type[LanguageServer] = NotImplemented
-
-    def __init__(self):
-        if self.language == NotImplemented:
-            raise NotImplementedError("Initializing a verifier without" +
-                                      " specifying its language.")
-
     @abstractmethod
     def verify(self, proof: str) -> VerificationResult:
         pass

@@ -186,7 +186,7 @@ class MERISTEMNode(Node):
         avoid_steps_str = "Some steps I plan not to use:\n"
         for peer in self.parent_OR_node.children:
             if isinstance(peer, ANDNode):
-                avoid_steps_str += "[STEP]" + peer.proof_step
+                avoid_steps_str += "[STEP]" + str(peer.proof_step)
                 avoid_steps_str += "[REASON]" + {
                     NodeDetailedState.DOESNT_COMPILE:
                         "\n".join(msg.text for msg in peer.error_messages),

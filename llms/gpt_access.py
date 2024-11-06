@@ -72,6 +72,8 @@ messages_skeleton = [
 ]
 
 class GptAccess(LLMAccess):
+    incurs_cost: bool = True
+
     def __init__(self, 
         model_name: str,
         budget_in_cents: int = 100,
@@ -93,7 +95,7 @@ class GptAccess(LLMAccess):
 
     def complete(self,
         prompt: str,
-        max_tokens: int = 100
+        max_tokens: int = 1000
     ) -> str:
         if self.model_name == "gpt-3.5-turbo-instruct":
             resp = self.complete_prompt(
@@ -104,7 +106,10 @@ class GptAccess(LLMAccess):
             return resp[0][0]
         else: # No complete_prompt capability, emulate using complete_chat
             messages = copy.deepcopy(messages_skeleton)
-            messages[0]["content"] = "Complete the following text."
+            messages[0]["content"] = """Complete the following text.
+Return raw text that can be simply concatenated with the original text.
+Do not use MarkDown formatting etc. if they interfere with raw text concatenation.
+"""
             messages[1]["content"] = prompt
             resp = self.complete_chat(
                 messages = messages,
@@ -201,6 +206,7 @@ class GptAccess(LLMAccess):
                 f"incurring a cost of {self.cost_in_cents} cents. "
                 "Terminating the program so that costs don't go out of hand."
             )
+
 
 if __name__ == "__main__":
     os.chdir(root_dir)

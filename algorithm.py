@@ -4,11 +4,9 @@ from threading import Thread
 
 from data_structures import *
 from verifiers.verifier import Verifier
-from verifiers.lean3_verifier import Lean3Verifier
-from verifiers.language import ProofSegment
+from verifiers.language import ProofSegment, VerifierLanguage
 from search_tree_visualization import present_search_tree
-#from prompt_gpt import GPTPrompter, CostCircuitBreak
-from llms.common import CostCircuitBreak
+from llms.common import LLMAccess, CostCircuitBreak
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -95,7 +93,8 @@ def backtrack(
 def expand(
     node: Node,
     proof_so_far: ProofSegment,
-    prompter: GPTPrompter,
+    language: VerifierLanguage,
+    llm_access: LLMAccess,
     verifier: Verifier,
     logger: logging.Logger
 ) -> None:
@@ -107,8 +106,9 @@ def expand(
         case ANDNode(proof_step=p):
             node.expanded = True
 
-            proof_to_run = n + "\n" + proof_so_far + standardize_indentation(p) + "\nend"
-            run_lean_proof_context, run_lean_messages = verifier.verify(proof_to_run) # TODO: this assumes indentation for tactic is 2
+            run_lean_proof_context, run_lean_messages = verifier.verify(
+                language.complete_proof(proof_so_far + p)
+            )
             logger.debug(f"Running the tactic {p} returns\n" +\
                         f"{run_lean_messages=} and\n" +\
                         f"{run_lean_proof_context=}")
@@ -119,7 +119,7 @@ def expand(
                 logger.info(
                     f"The tactic {p} failed to compile. Error messages:\n" +
                     "\n".join(msg.text for msg in node.error_messages) + '\n' +
-                    "Full proof:\n" + proof_to_run + '\n'
+                    "Full proof:\n" + str(proof_so_far) + '\n'
                 )
                 node.detailed_state = NodeDetailedState.DOESNT_COMPILE
             else:
@@ -166,7 +166,10 @@ def expand(
                         f"with cautions {print_friendly_avoid_steps_str}")
             comment = "The current goal:\n" + p.goal.format_message() + '\n'
             comment += a + '\n'
-            proof_steps_to_try: List[ProofSegment] = prompter.prompt_for_tactics(proof_so_far, comment) # !!TODO: replace prompt_for_tactics with predict_proof_step
+            #proof_steps_to_try: List[ProofSegment] = language.predict_proof_step(proof_so_far, comment, llm_access)
+            # At one point of time, we allowed predicting more than one applicable tactic at once
+            # Since then, we changed the interfaces and only predict one at a time
+            proof_steps_to_try: List[ProofSegment] = [language.predict_proof_step(proof_so_far, comment, llm_access)]
 
             for proof_step in proof_steps_to_try:
                 if proof_step.indicates_abandonment:
@@ -189,7 +192,7 @@ def expand(
                     AND_peer = ANDNode(proof_step)
                     p.add_child(AND_peer)
 
-                    expand(AND_peer, proof_so_far, prompter, verifier, logger)
+                    expand(AND_peer, proof_so_far, language, llm_access, verifier, logger)
                     # This is an optimization--we expand AND nodes as soon as
                     # they are created, rather than wait for `find()` to visit
                     # the AND node. This is because expanding AND nodes is
@@ -202,17 +205,18 @@ def find(
     node: Node,
     proof_so_far: ProofSegment,
     estimate: Callable[[Node], float],
-    prompter: GPTPrompter,
+    language: VerifierLanguage,
+    llm_access: LLMAccess,
     verifier: Verifier,
     logger: logging.Logger,
 ) -> None:
     print_friendly_node_str = str(node).replace("\n", "\\n")
     logger.debug(f"find() visits the node {print_friendly_node_str}, which currently has a cost estimate of {estimate(node)}")
     if not node.expanded:
-        expand(node, proof_so_far, prompter, verifier, logger)
+        expand(node, proof_so_far, language, llm_access, verifier, logger)
         backtrack(node, logger)
     else:
-        nodes_temporarily_marked_NO_PROGRESS = list()
+        nodes_temporarily_marked_NO_PROGRESS: List[Tuple[Node, NodeDetailedState]] = list()
         match node:
             case ANDNode(proof_step=s):
                 # !!TODO: check how to deal with these
@@ -239,20 +243,21 @@ def find(
                 raise RuntimeError("A MERISTEMNode failed to be a leaf node. Check the implementation for mistakes.")
             case _:
                 raise TypeError(f"Unknown node type: {type(node)}")
-        
+
         logger.debug("AOStar cost estimates of children:\n" +\
             '\n'.join(f"{str(child)}: {estimate(child)}" for child in node.children)
         )
 
         best_child = min(node.active_children, key=estimate)
-        find(best_child, proof_so_far, estimate, prompter, verifier, logger)
+        find(best_child, proof_so_far, estimate, language, llm_access, verifier, logger)
         for changed_node, original_state in nodes_temporarily_marked_NO_PROGRESS:
             changed_node.detailed_state = original_state
 
 def ao_star(
     theorem_statement: str, # Not necessarily a Lean "theorem"; can also be an "example" etc.
     estimate: Callable[[Node], float],
-    prompter: GPTPrompter,
+    language: VerifierLanguage,
+    llm_access: LLMAccess,
     verifier: Verifier,
     logger: logging.Logger,
     load_checkpoint_path: Optional[str],
@@ -280,19 +285,25 @@ def ao_star(
         # Remove blank lines at the end of the string, so logs are more concise
         theorem_statement = re.sub(r'\s*\n\s*$', '', theorem_statement, flags=re.MULTILINE)
         theorem_statement += "\nbegin"
-        root = ANDNode(
-            proof_step = theorem_statement,
-            imports = ""
-        )
+        initial_proof_step = language.proof_segment_type(theorem_statement)
+        root = ANDNode(proof_step = initial_proof_step)
         root.root = root
-        expand(root, "", prompter, verifier, logger)
+        expand(root, language.proof_segment_type.empty_proof(), language, llm_access, verifier, logger)
         assert root.state != NodeState.FAILED, f"Problems in the theorem statement:\n{root.error_messages}"
         assert len(root.children) == 1, "It's unexpected that the theorem statement already begets not exactly one goal." # Let me know if my assumption is wrong
 
     logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started.')
     try:
         while root.state == NodeState.ACTIVE:
-            find(root, "", estimate, prompter, verifier, logger)
+            find(
+                root,
+                language.proof_segment_type.empty_proof(),
+                estimate,
+                language,
+                llm_access,
+                verifier,
+                logger
+            )
             if dump_checkpoint_path:
                 # Trick to prevent the saving process from being interrupted by KeyboardInterrupt
                 # Found at https://stackoverflow.com/a/842567
@@ -328,7 +339,7 @@ def ao_star(
     logger.info("Proof search tree:\n" + present_search_tree(root, style = 'plain'))
     logger.info("The above includes Unicode characters. Make sure to use a compatible terminal emulator or editor.")
     logger.info(f"{calculate_expansion_rate(root):.2%} of expanded AND nodes compiled fine.")
-    logger.info(prompter.token_and_cost_stats)
+    logger.info(llm_access.cost_stats)
     return proof_str
 
 def serialize_tree(root: Node, file: str) -> None:
@@ -396,6 +407,9 @@ def collect_solution(node: Node, proof_so_far: ProofSegment) -> ProofSegment:
 
 if __name__ == "__main__":
     # Test driving code
+    from verifiers.lean3_verifier import Lean3Verifier
+    from verifiers.lean3_server import Lean3Server
+    from llms.gpt_access import GptAccess
 
     theorem_statement = "theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :="
     #theorem_statement = "theorem inequality_chain (a b c d: ℕ) (h₀ : a ≤ b) (h₁ : b ≤ c) (h₂ : c ≤ d) : a ≤ d :="
@@ -447,13 +461,16 @@ if __name__ == "__main__":
             case _:
                 raise NotImplementedError(f"Unable to put an estimate on {node=}")
 
-    prompter = GPTPrompter(think_aloud=True, model_name="gpt-4o-mini")
+    # !!!! TODO: change GPTPrompter to VerifierLanguage
+    language = Lean3Server()
+    llm_access = GptAccess("gpt-4o-mini")
     verifier = Lean3Verifier()
 
     print(ao_star(
         theorem_statement,
         estimate,
-        prompter,
+        language,
+        llm_access,
         verifier,
         logger,
         load_checkpoint_path,
