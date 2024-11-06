@@ -27,6 +27,8 @@ class Lean4Verifier(Verifier):
     # !!!!TODO: implement
     # !!TODO: perhaps better to give Goal-PartialProofArrivingAtGoal pairs
 
+    # TODO: attribute
+    # Also: message here is diff from other places: explain
     def verify_lean4_file(self, code, lake_path=DEFAULT_LAKE_PATH, lean_workspace=DEFAULT_LEAN_WORKSPACE, last_env=None, verbose=False, timeout=300, allTactics=False, ast=False, premises=False, tactics=False):
         #os.environ['LEAN_PATH'] = LEAN_PATH
         command = dict(cmd=code, allTactics=allTactics, ast=ast, tactics=tactics, premises=premises)
@@ -68,7 +70,8 @@ class Lean4Verifier(Verifier):
         return result
 
 if __name__ == "__main__":
-    code = """
+    if False:
+        code = """
 -- Definitions about natural numbers and primes
 import Mathlib.Data.Nat.Prime
 
@@ -132,7 +135,7 @@ theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
   · exact pp
 
 """
-    code = """
+        code = """
 -- Definitions about natural numbers and primes
 import Mathlib.Data.Nat.Prime
 
@@ -146,6 +149,10 @@ open Nat
 -- Define theorem or goal to prove
 theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
   sorry
+"""
+
+    code = """
+garbage
 """
     verifier = Lean4Verifier()
     print(verifier.verify_lean4_file(code))

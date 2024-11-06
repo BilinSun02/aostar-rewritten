@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 from .language import *
-from .verifier import Verifier
+from .verifier import Verifier, ProofState, Message
 from .lean4_verifier import Lean4Verifier
 from llms.prompts import *
 from llms.common import LLMAccess
