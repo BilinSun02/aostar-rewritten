@@ -48,10 +48,7 @@ class Verifier(ABC):
     @abstractmethod
     def verify(self, proof: str) -> VerificationResult:
         pass
-
-    # !!TODO: require a method for giving Goal-PartialProofArrivingAtGoal pairs
-    #@abstractmethod
-    #def a
+    # !!TODO: perhaps better to give Goal-PartialProofArrivingAtGoal pairs
 
 # Unit test code
 if __name__ == "__main__":

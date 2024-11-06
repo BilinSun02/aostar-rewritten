@@ -1,5 +1,5 @@
 import os, datetime, argparse, pickle, traceback, re, logging
-from typing import Callable, Final
+from typing import Callable, Final, Tuple
 from threading import Thread
 
 from data_structures import *
@@ -312,6 +312,7 @@ def ao_star(
     logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started.')
     try:
         while root.state == NodeState.ACTIVE:
+            print("==============find() call=================")
             find(
                 root,
                 language.proof_segment_type.empty_proof(),
@@ -372,16 +373,18 @@ def calculate_expansion_rate(root: Node) -> float:
     counted_nodes = []
     def traverse(node: Node) -> None:
         nonlocal compiling_count, expanded_count
-        if isinstance(node, ANDNode):
-            if not any(node is counted_node for counted_node in counted_nodes):
+        # Since we may now have loops on the "tree",
+        # be careful to count each node only once
+        if not any(node is counted_node for counted_node in counted_nodes):
+            if isinstance(node, ANDNode):
             # `node not in counted_nodes` won't work because that uses `==` rather than `is`
                 counted_nodes.append(node) # This is necessary because we no longer have a proper tree. Running DFS can visit some nodes more than once.
                 if node.expanded:
                     expanded_count += 1
                     if node.detailed_state != NodeDetailedState.DOESNT_COMPILE:
                         compiling_count += 1
-        for child in node.children:
-            traverse(child)
+            for child in node.children:
+                traverse(child)
 
     traverse(root)
 
