@@ -229,15 +229,32 @@ def find(
                 proof_so_far += s
             case ORNode(goal=g):
                 def disable_descendants_with_goal(node: Node, goal: Goal) -> None:
+                    match node:
+                        case ORNode(goal=g):
+                            print(f"disable_descendants_with_goal visits node {g}, which is {node.detailed_state}\n")
+                        case ANDNode(tactics=t):
+                            print(f"disable_descendants_with_goal visits node {t}, which is {node.detailed_state}\n")
                     nonlocal nodes_temporarily_marked_NO_PROGRESS
                     for child in node.children:
                         if child.state == NodeState.ACTIVE: # Guards against infinite loops. Nodes that would lead to loops would have been marked NO_PROGRESS before this line.
                             if isinstance(child, ORNode) and child.goal == goal:
+                                print(f"disable_descendants_with_goal kills node {goal}\n")
                                 child.detailed_state = NodeDetailedState.NO_PROGRESS
                                 nodes_temporarily_marked_NO_PROGRESS += backtrack(child, null_logger)
                                 #disable_descendants_with_goal(child, goal) # This would result in infinite recursion
                             else:
+                                match child:
+                                    case ORNode(goal=g):
+                                        print(f"disable_descendants_with_goal does not kill node {g}, which is {node.detailed_state}\n")
+                                    case ANDNode(tactics=t):
+                                        print(f"disable_descendants_with_goal does not kill node {t}, which is {node.detailed_state}\n")
                                 disable_descendants_with_goal(child, goal)
+                        else:
+                            match node:
+                                case ORNode(goal=g):
+                                    print(f"Not passing to node {g} which is not active.")
+                                case ANDNode(tactics=t):
+                                    print(f"Not passing to node {t} which is not active.")
                 disable_descendants_with_goal(node, g)
             case MERISTEMNode():
                 raise RuntimeError("A MERISTEMNode failed to be a leaf node. Check the implementation for mistakes.")
