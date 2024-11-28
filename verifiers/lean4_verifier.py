@@ -23,7 +23,8 @@ DEFAULT_LEAN_WORKSPACE = '/share/data/mathzero/billion/2dsmodel/DeepSeek-Prover-
 
 class Lean4Verifier(Verifier):
     def verify(self, proof: str) -> VerificationResult:
-        pass
+        response = self.verify_lean4_file(proof)
+        return VerificationResult(state=response['state'], messages=response['messages'])
     # !!!!TODO: implement
     # !!TODO: perhaps better to give Goal-PartialProofArrivingAtGoal pairs
 

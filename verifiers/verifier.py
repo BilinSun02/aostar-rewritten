@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import NamedTuple, List, Optional, Type
 from abc import ABC, abstractmethod
-from .language import ProofSegment
 
 @dataclass
 class Message:
@@ -42,7 +41,6 @@ class VerificationResult:
     messages: List[Message] = field(default_factory=list)
 
 EmptyResult = VerificationResult()
-
 
 class Verifier(ABC):
     @abstractmethod

@@ -50,6 +50,11 @@ class Lean4Server(VerifierLanguage):
 
     def complete_proof(self, proof_segment: Lean4ProofSegment) -> str:
         proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
+        # !!TODO: may also need `sorry`
+        return proof_str
+
+    def close_proof(self, proof_segment: ProofSegment) -> str:
+        proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
         return proof_str
 
     def predict_proof_step(
