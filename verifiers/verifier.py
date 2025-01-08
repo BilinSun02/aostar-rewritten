@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import NamedTuple, List, Optional, Type
 from abc import ABC, abstractmethod
-from .language import ProofSegment
 
 @dataclass
 class Message:
@@ -32,17 +31,14 @@ class ProofState(NamedTuple):
     state_str: str
     goals: List[Goal]
 
-    @classmethod
-    def empty(cls: 'ProofState'):
-        return ProofState("", [])
+EmptyProofState = ProofState("", [])
 
 @dataclass
 class VerificationResult:
-    state: Optional[str] = None
+    state: Optional[ProofState] = None
     messages: List[Message] = field(default_factory=list)
 
 EmptyResult = VerificationResult()
-
 
 class Verifier(ABC):
     @abstractmethod

@@ -54,6 +54,11 @@ class Lean3Server(VerifierLanguage):
         proof_str += '\nend'
         return proof_str
 
+    def close_proof(self, proof_segment: ProofSegment) -> str:
+        proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
+        proof_str += '\nend'
+        return proof_str
+
     @staticmethod
     def remove_end_line(string: str) -> str:
         """

@@ -58,13 +58,17 @@ class Lean4Server(VerifierLanguage):
 
     def complete_proof(self, proof_segment: Lean4ProofSegment) -> str:
         proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
+<<<<<<< HEAD
         # !!!TODO: the following assumes putting one `sorry` closes the proof
         # However, we may need >1, and worse yet at different ind. levels
         proof_str += '\n' + get_last_indentation(proof_str) + 'sorry'
+=======
+        # !!TODO: may also need `sorry`
         return proof_str
 
     def close_proof(self, proof_segment: ProofSegment) -> str:
         proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
+>>>>>>> refs/remotes/origin/v2_0
         return proof_str
 
     def predict_proof_step(

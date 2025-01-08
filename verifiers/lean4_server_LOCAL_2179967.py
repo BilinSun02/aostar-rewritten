@@ -63,10 +63,6 @@ class Lean4Server(VerifierLanguage):
         proof_str += '\n' + get_last_indentation(proof_str) + 'sorry'
         return proof_str
 
-    def close_proof(self, proof_segment: ProofSegment) -> str:
-        proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
-        return proof_str
-
     def predict_proof_step(
         self,
         proof_segment: Lean4ProofSegment,

@@ -106,9 +106,9 @@ def expand(
         case ANDNode(proof_step=p):
             node.expanded = True
 
-            run_lean_proof_context, run_lean_messages = verifier.verify(
-                language.complete_proof(proof_so_far + p)
-            )
+            verification_result = verifier.verify(language.complete_proof(proof_so_far + p))
+            run_lean_proof_context = verification_result.state
+            run_lean_messages = verification_result.messages
             logger.debug(f"Running the tactic {p} returns\n" +\
                         f"{run_lean_messages=} and\n" +\
                         f"{run_lean_proof_context=}")
@@ -250,7 +250,7 @@ def find(
                                         print(f"disable_descendants_with_goal does not kill node {t}, which is {node.detailed_state}\n")
                                 disable_descendants_with_goal(child, goal)
                         else:
-                            match node:
+                            match child:
                                 case ORNode(goal=g):
                                     print(f"Not passing to node {g} which is not active.")
                                 case ANDNode(tactics=t):
@@ -312,7 +312,7 @@ def ao_star(
     logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search started.')
     try:
         while root.state == NodeState.ACTIVE:
-            print("==============find() call=================")
+            print("==============find() call=================") # !!!TODO: remove
             find(
                 root,
                 language.proof_segment_type.empty_proof(),
@@ -346,7 +346,7 @@ def ao_star(
     proof_str = ""
     match root.state:
         case NodeState.SOLVED:
-            proof_str = collect_solution(root, "")
+            proof_str = collect_solution(root)
             logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search successful:\n' + proof_str)
         case NodeState.FAILED:
             logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search unsuccessful.')
@@ -393,37 +393,50 @@ def calculate_expansion_rate(root: Node) -> float:
 
     return compiling_count / expanded_count
 
-def collect_solution(node: Node, proof_so_far: ProofSegment) -> ProofSegment:
-    # !!! TODO: rewrite proof_so_far to be ProofSegment
-    assert node.solved, f"{node=} is not solved"
-    match node:
-        case ANDNode(proof_step=proof_step):
-            # !!TODO: reconsider how to deal with indentation
-            ## Unless the current node is the root,
-            ## the tactic here needs to be indented
-            #proof_step = standardize_indentation(proof_step, 4)
-            proof = proof_so_far
-            for child in node.children:
-                proof = collect_solution(child, proof)
-                # The recursive call will check the children are each solved
-            if not node.parents: # root Node
-                # !!TODO: reconsider end
-                proof += "end"
-        case ORNode(_):
-            proof_str = proof_so_far
-            properly_settled = False
-            for child in node.children:
-                if child.solved:
-                    proof_str = collect_solution(child, proof_str)
-                    properly_settled = True
-                    break # TODO: If more than one proof is found, print all possibilities
-            if not properly_settled:
-                raise RuntimeError(f"OR node {node} has no solved child")
-        case MERISTEMNode():
-            raise RuntimeError("A MERISTEM node should never be part of a solution")
-        case _:
-            raise TypeError(f"Unknown node type: {type(node)}")
-    return proof_str
+def collect_solution(
+    node: Node,
+    proof_so_far: ProofSegment,
+    language: VerifierLanguage,
+) -> str:
+    def collect_solution_segment(
+        node: Node,
+        proof_so_far: ProofSegment,
+    ) -> ProofSegment:
+        assert node.solved, f"{node=} is not solved"
+        match node:
+            case ANDNode(proof_step=proof_step):
+                # !!TODO: reconsider how to deal with indentations
+                ## Unless the current node is the root,
+                ## the tactic here needs to be indented
+                #proof_step = standardize_indentation(proof_step, 4)
+                for child in node.children:
+                    proof_so_far = collect_solution_segment(child, proof_so_far)
+                    # The recursive call will check the children are each solved
+            case ORNode(_):
+                has_solved_child = False
+                for child in node.children:
+                    if child.solved:
+                        proof_so_far = collect_solution_segment(child, proof_so_far)
+                        has_solved_child = True
+                        break # TODO: If more than one proof is found, print all possibilities
+                assert has_solved_child, f"OR node {node} has no solved child"
+            case MERISTEMNode():
+                raise RuntimeError("A MERISTEM node should never be part of a solution")
+            case _:
+                raise TypeError(f"Unknown node type: {type(node)}")
+        return proof_so_far
+
+    if proof_so_far is None:
+        proof_so_far = language.proof_segment_type.empty_proof()
+    proof_segment = collect_solution_segment(
+        node,
+        proof_so_far,
+        language
+    )
+    if not node.parents:
+        return str(proof_segment)
+    else:
+        return language.close_proof(proof_segment)
 
 if __name__ == "__main__":
     # Test driving code
@@ -481,7 +494,6 @@ if __name__ == "__main__":
             case _:
                 raise NotImplementedError(f"Unable to put an estimate on {node=}")
 
-    # !!!! TODO: change GPTPrompter to VerifierLanguage
     language = Lean3Server()
     llm_access = GptAccess("gpt-4o-mini")
     verifier = Lean3Verifier()

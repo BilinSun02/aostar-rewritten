@@ -11,6 +11,7 @@ from lean3_cmd_executor_aostar import run_proof_on_lean
 from custom_logger import create_logger
 from algorithm import ao_star, NodeState
 from data_structures import *
+# !!!! TODO: change GPTPrompter to VerifierLanguage
 from prompt_gpt import GPTPrompter
 
 

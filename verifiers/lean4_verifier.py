@@ -24,7 +24,7 @@ DEFAULT_LEAN_WORKSPACE = '/share/data/mathzero/billion/2dsmodel/DeepSeek-Prover-
 class Lean4Verifier(Verifier):
     def verify(self, proof: str) -> VerificationResult:
         response = self.verify_lean4_file(proof)
-        return VerificationResult
+        return VerificationResult(state=response['state'], messages=response['messages'])
     # !!!!TODO: implement
     # !!TODO: perhaps better to give Goal-PartialProofArrivingAtGoal pairs
 
@@ -35,9 +35,27 @@ class Lean4Verifier(Verifier):
 
     # TODO: attribute
     # Also: message here is diff from other places: explain
-    def verify_lean4_file(self, code, lake_path=DEFAULT_LAKE_PATH, lean_workspace=DEFAULT_LEAN_WORKSPACE, last_env=None, verbose=False, timeout=300, allTactics=False, ast=False, premises=False, tactics=False):
+    def verify_lean4_file(
+        self,
+        code,
+        lake_path = DEFAULT_LAKE_PATH,
+        lean_workspace = DEFAULT_LEAN_WORKSPACE,
+        last_env = None,
+        verbose = False,
+        timeout = 300,
+        allTactics = False,
+        ast = False,
+        premises = False,
+        tactics = False
+    ):
         #os.environ['LEAN_PATH'] = LEAN_PATH
-        command = dict(cmd=code, allTactics=allTactics, ast=ast, tactics=tactics, premises=premises)
+        command = dict(
+            cmd = code,
+            allTactics = allTactics,
+            ast = ast,
+            tactics = tactics,
+            premises = premises
+        )
         if last_env is not None:
             command.update(env=last_env)
         message_str = json.dumps(command, ensure_ascii=False)
