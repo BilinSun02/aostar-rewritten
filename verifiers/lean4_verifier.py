@@ -32,8 +32,7 @@ lean4_goal_regex = rf"([\s|\S]*?){lean4_proof_state_separator}([\s|\S]*)"
 class Lean4Verifier(Verifier):
     def verify(self, proof: str) -> VerificationResult:
         response = self.run_lean4_file(proof)
-        return VerificationResult(state=response['state'], messages=response['messages'])
-    # !!!!TODO: implement
+        return self.parse_repl_result(response)
     # !!TODO: perhaps better to give Goal-PartialProofArrivingAtGoal pairs
 
     # TODO: attribute
@@ -134,7 +133,7 @@ class Lean4Verifier(Verifier):
         goals = map(self.parse_goal, goal_strs)
         return ProofState(proof_state_str, goals)
 
-    def parse_goal(self, goal_str: str): # !!!!! TODO: adapt
+    def parse_goal(self, goal_str: str) -> Goal: # !!!!! TODO: adapt
         goal_str = goal_str.strip()
         inference = ""
         hyps_infs = re.findall(lean4_goal_regex, goal_str, re.MULTILINE)
@@ -244,4 +243,4 @@ theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁
   sorry
 """
     verifier = Lean4Verifier()
-    print(verifier.run_lean4_file(code))
+    print(verifier.verify(code))

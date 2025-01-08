@@ -139,7 +139,7 @@ class Lean3Verifier(Verifier):
             goals.append(goal)
         return ProofState(proof_state_str, goals)
 
-    def parse_goal(self, goal_str: str):
+    def parse_goal(self, goal_str: str) -> Goal:
         goal_str = goal_str.strip()
         goal = ""
         hyps_infs = re.findall(lean3_goal_regex, goal_str, re.MULTILINE)
