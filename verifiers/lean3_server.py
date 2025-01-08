@@ -49,12 +49,7 @@ class Lean3Server(VerifierLanguage):
     proof_segment_type: Type[ProofSegment] = Lean3ProofSegment
     verifier: Verifier = Lean3Verifier()
 
-    def complete_proof(self, proof_segment: Lean3ProofSegment) -> str:
-        proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
-        proof_str += '\nend'
-        return proof_str
-
-    def close_proof(self, proof_segment: ProofSegment) -> str:
+    def close_proof(self, proof_segment: Lean3ProofSegment) -> str:
         proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
         proof_str += '\nend'
         return proof_str

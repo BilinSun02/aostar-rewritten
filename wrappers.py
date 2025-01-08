@@ -340,7 +340,7 @@ class AOStarSingleFileSolver(AOStarBatchSolver):
             # being complete (i.e., having `theorem` (or example), `begin` and `end`)
             self.main_logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Started checking integrity of lean files.')
             _, preliminary_run_messages = run_proof_on_lean(self.lean_file_contents)
-            assert all(not msg.level == 'error' for msg in preliminary_run_messages), f"Problems in the theorem statement:\n{preliminary_run_messages}"
+            assert all(not msg.severity == 'error' for msg in preliminary_run_messages), f"Problems in the theorem statement:\n{preliminary_run_messages}"
             self.main_logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Checked file {self.lean_file_name} and it compiled.')
 
     @staticmethod
@@ -410,7 +410,7 @@ class AOStarCopraYAMLSolver(AOStarBatchSolver):
                         lean_file_contents,
                         timeout_in_secs = 300 # Increase this further if needed
                     )
-                    assert all(not msg.level == 'error' for msg in preliminary_run_messages),\
+                    assert all(not msg.severity == 'error' for msg in preliminary_run_messages),\
                         f"Problems in the theorem statements in {lean_file_full_path}:\n{preliminary_run_messages}"
             self.main_logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: All lean files succeeessfully compiled.')
             # The above would check if the lean files compile, like AOStarSingleFileSolver does
@@ -437,7 +437,7 @@ class AOStarCopraYAMLSolver(AOStarBatchSolver):
             #                    thm_statement,
             #                    max_memory_in_mib = 3000
             #                )
-            #                assert all(not msg.level == 'error' for msg in preliminary_run_messages), f"Problems in the theorem statement:\n{preliminary_run_messages}"
+            #                assert all(not msg.severity == 'error' for msg in preliminary_run_messages), f"Problems in the theorem statement:\n{preliminary_run_messages}"
     
     @staticmethod
     def find_imports(lean_file_contents) -> str:

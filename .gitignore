@@ -4,3 +4,4 @@ leanpkg.path
 temp_*
 logs
 outputs
+.secrets

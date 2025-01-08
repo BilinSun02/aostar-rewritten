@@ -59,14 +59,6 @@ class VerifierLanguage(ABC):
             " how to handle proof segments."
 
     @abstractmethod
-    def complete_proof(self, proof_segment: ProofSegment) -> str:
-        """
-        Given a proof segment, supply dummy parts (e.g. `sorry` and `end`
-        in Lean), if needed, to get a proof that can pass on the verifier.
-        """
-        pass
-
-    @abstractmethod
     def close_proof(self, proof_segment: ProofSegment) -> str:
         """
         Given a proof segment, supply dummy parts (e.g. `end` in Lean)

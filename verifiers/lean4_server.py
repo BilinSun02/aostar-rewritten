@@ -48,20 +48,14 @@ class Lean4Server(VerifierLanguage):
     proof_segment_type: Type[ProofSegment] = Lean4ProofSegment
     verifier: Verifier = Lean4Verifier()
 
-    @staticmethod
-    def get_last_indentation(multiline_string):
-        # Get the last non-empty line
-        lines = [line for line in multiline_string.splitlines() if line.strip()]
-        last_line = lines[-1] if lines else ""
-        indentation_string = last_line[:len(last_line) - len(last_line.lstrip())]
-        return indentation_string
-
-    def complete_proof(self, proof_segment: Lean4ProofSegment) -> str:
-        proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
-        # !!!TODO: the following assumes putting one `sorry` closes the proof
-        # However, we may need >1, and worse yet at different ind. levels
-        proof_str += '\n' + get_last_indentation(proof_str) + 'sorry'
-        return proof_str
+    # Not currently used
+    #@staticmethod
+    #def get_last_indentation(multiline_string):
+    #    # Get the last non-empty line
+    #    lines = [line for line in multiline_string.splitlines() if line.strip()]
+    #    last_line = lines[-1] if lines else ""
+    #    indentation_string = last_line[:len(last_line) - len(last_line.lstrip())]
+    #    return indentation_string
 
     def close_proof(self, proof_segment: ProofSegment) -> str:
         proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics

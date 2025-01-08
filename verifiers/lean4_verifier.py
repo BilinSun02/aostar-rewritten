@@ -5,8 +5,10 @@ import tempfile
 import traceback
 import threading
 import subprocess
+import re
+from typing import Any, List
 
-from .verifier import Verifier, VerificationResult
+from .verifier import Verifier, VerificationResult, Message, ProofState, EmptyProofState, Goal
 from .lean4_repl_ast_parser import lean4_parser
 
 HOME_DIR = os.path.expanduser('~')
@@ -21,21 +23,22 @@ DEFAULT_LEAN_WORKSPACE = '/share/data/mathzero/billion/2dsmodel/DeepSeek-Prover-
 #    "./.lake/packages/proofwidgets"
 #]])
 
+lean4_proof_state_separator = "⊢" # Separates hypotheses from inference
+lean4_proof_state_boundary = "\n\n" # Separates states
+lean4_proof_state_regex = r"((\d+) goals)*([\s|\S]*?)\n\n"
+lean4_has_state_message = 'unsolved goals\n'
+lean4_goal_regex = rf"([\s|\S]*?){lean4_proof_state_separator}([\s|\S]*)"
+
 class Lean4Verifier(Verifier):
     def verify(self, proof: str) -> VerificationResult:
-        response = self.verify_lean4_file(proof)
+        response = self.run_lean4_file(proof)
         return VerificationResult(state=response['state'], messages=response['messages'])
     # !!!!TODO: implement
     # !!TODO: perhaps better to give Goal-PartialProofArrivingAtGoal pairs
 
-        # Calculate the indentation level (number of leading spaces or tabs)
-        indentation_level = len(last_line) - len(last_line.lstrip())
-
-        return indentation_level
-
     # TODO: attribute
     # Also: message here is diff from other places: explain
-    def verify_lean4_file(
+    def run_lean4_file(
         self,
         code,
         lake_path = DEFAULT_LAKE_PATH,
@@ -47,7 +50,7 @@ class Lean4Verifier(Verifier):
         ast = False,
         premises = False,
         tactics = False
-    ):
+    ) -> dict[str, Any]: # !!!!!TODO: clarify this Any
         #os.environ['LEAN_PATH'] = LEAN_PATH
         command = dict(
             cmd = code,
@@ -61,8 +64,8 @@ class Lean4Verifier(Verifier):
         message_str = json.dumps(command, ensure_ascii=False)
         if verbose:
             print(message_str)
-        start_time = time.time()
-        system_messages = ''
+        #start_time = time.time()
+        #system_messages = ''
         try:
             with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as temp_file:
                 temp_file.write(message_str + "\r\n\r\n")
@@ -73,25 +76,78 @@ class Lean4Verifier(Verifier):
             result = {
                 "sorries" : result.get('sorries', []), 
                 "tactics" : result.get('tactics', []),
-                "errors" : [m for m in result.get('messages', []) if m['severity'] == 'error'],
-                "warnings" : [m for m in result.get('messages', []) if m['severity'] == 'warning'],
-                "infos" : [m for m in result.get('messages', []) if m['severity'] == 'info'],
-                "system_messages" : system_messages,
-                "system_errors" : None,
-                "ast" : ast_results,
-                "verified_code" : code,
+                #"errors" : [m for m in result.get('messages', []) if m['severity'] == 'error'],
+                #"warnings" : [m for m in result.get('messages', []) if m['severity'] == 'warning'],
+                #"infos" : [m for m in result.get('messages', []) if m['severity'] == 'info'],
+                "messages" : result.get('messages', []),
+                #"system_messages" : system_messages,
+                #"system_errors" : None,
+                #"ast" : ast_results,
+                #"verified_code" : code,
             }
-            result['pass'] = not result['errors']
-            result['complete'] = result['pass'] and not result['sorries'] and not any("declaration uses 'sorry'" in warning['data'] or 'failed' in warning['data'] for warning in result['warnings'])
+            #result['pass'] = not any(map(lambda m: m['severity'] == 'error', result['messages']))
+            #result['complete'] = result['pass'] and not result['sorries'] and not any("declaration uses 'sorry'" in warning['data'] or 'failed' in warning['data'] for warning in result['warnings'])
         except:
-            result = {
-                "pass": False,
-                "complete": False,
-                "system_errors": traceback.format_exc(),
-                "system_messages": system_messages
-            }
-        result['verify_time'] = time.time() - start_time
+            #result = {
+            #    #"pass": False,
+            #    #"complete": False,
+            #    "system_errors": traceback.format_exc(),
+            #    "system_messages": system_messages
+            #}
+            pass
+            # In our codebase, we don't handle this.
+        #result['verify_time'] = time.time() - start_time
         return result
+
+    def parse_repl_result(self, result: dict[str, Any]) -> VerificationResult:
+        messages : List[Message] = []
+        state = EmptyProofState
+        for m in result[messages]:
+            if m['severity'] == 'error' and m['data'].startswith(lean4_has_state_message):
+                unparsed_state = m['data'][len(lean4_has_state_message):]
+                # I don't expect multiple proof state messages to occur
+                # but should they do, avoid overwriting and let us investigate why this happens
+                if not state == EmptyProofState:
+                    print(f"Found multiple proof state messages: {state=}, {unparsed_state=}")
+                    assert False
+                state = self.parse_proof_state(unparsed_state)
+            else:
+                messages.append(Message(
+                    m['severity'],
+                    m['data'],
+                    m['pos']['line'],
+                    m['pos']['column'],
+                    m['endPos']['line'],
+                    m['endPos']['column'],
+                ))
+
+        return VerificationResult(state, messages)
+                
+    def parse_proof_state( # !!!!! TODO: adapt
+        self,
+        proof_state_str: str
+    ) -> ProofState:
+        assert proof_state_str
+        if lean4_proof_state_separator not in proof_state_str:
+            raise ValueError(f"Invalid {proof_state_str=}")
+        goal_strs = proof_state_str.split(lean4_proof_state_boundary)
+        goals = map(self.parse_goal, goal_strs)
+        return ProofState(proof_state_str, goals)
+
+    def parse_goal(self, goal_str: str): # !!!!! TODO: adapt
+        goal_str = goal_str.strip()
+        inference = ""
+        hyps_infs = re.findall(lean4_goal_regex, goal_str, re.MULTILINE)
+        assert len(hyps_infs) == 1, f"Found zero or more than one goal in the goal string: {goal_str}"
+        hypotheses_str, inference = hyps_infs[0]
+        hypotheses_str = hypotheses_str.strip()
+        inference = inference.strip()
+        hypotheses = [hyp.rstrip(',') for hyp in hypotheses_str.split("\n")]
+        # Get rid of all the empty hypotheses
+        hypotheses = [hyp for hyp in hypotheses if len(hyp) > 0]
+        goal = Goal(hypotheses, inference)
+        return goal
+
 
 if __name__ == "__main__":
     if False:
@@ -176,7 +232,16 @@ theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
 """
 
     code = """
-garbage
+import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h))
+    (h₂ : b = 30) (h₃ : h = 13 / 2) : v = 65 := by
+  sorry
 """
     verifier = Lean4Verifier()
-    print(verifier.verify_lean4_file(code))
+    print(verifier.run_lean4_file(code))

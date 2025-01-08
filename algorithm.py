@@ -106,7 +106,7 @@ def expand(
         case ANDNode(proof_step=p):
             node.expanded = True
 
-            verification_result = verifier.verify(language.complete_proof(proof_so_far + p))
+            verification_result = verifier.verify(language.close_proof(proof_so_far + p))
             run_lean_proof_context = verification_result.state
             run_lean_messages = verification_result.messages
             logger.debug(f"Running the tactic {p} returns\n" +\
@@ -114,7 +114,7 @@ def expand(
                         f"{run_lean_proof_context=}")
             logger.debug(f"Running the tactic {p} leads to goals {run_lean_proof_context.goals}")
 
-            node.error_messages = [msg for msg in run_lean_messages if msg.level == 'error']
+            node.error_messages = [msg for msg in run_lean_messages if msg.severity == 'error']
             if len(node.error_messages) > 0: # Presumably Lean syntax errors
                 logger.info(
                     f"The tactic {p} failed to compile. Error messages:\n" +

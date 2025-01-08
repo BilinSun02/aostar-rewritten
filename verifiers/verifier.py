@@ -4,11 +4,12 @@ from abc import ABC, abstractmethod
 
 @dataclass
 class Message:
-    level: str
-    file_name: str
-    line_num: int
-    column_num: int
+    severity: str
     text: str
+    begin_line_num: int
+    begin_column_num: int
+    end_line_num: Optional[int] = None
+    end_column_num: Optional[int] = None
 
 # Adapted from lean_cmd_executor.py
 class Goal(NamedTuple):

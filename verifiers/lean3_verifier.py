@@ -3,7 +3,7 @@ import os, tempfile
 import re
 import typing
 from subprocess import Popen, PIPE, STDOUT
-from typing import Tuple
+from typing import Tuple, List, Optional
 from .language import ProofState, EmptyProofState
 
 lean3_proof_state_separator = "⊢"
@@ -63,36 +63,36 @@ class Lean3Verifier(Verifier):
         messages = output.split(abs_path)
         messages = [msg for msg in messages if len(msg) > 0] # Remove empty strings
         final_messages : typing.List[Message] = []
-        state = None
-        msg_unparsed = []
+        state : Optional[ProofState] = None
+        msg_unparsed : List[str] = []
         for msg in messages:
             # Get rid of line number and column number
             try:
                 line_num_str, col_num_str, level_str, text = msg.split(':', 3)
                 line_num_str = line_num_str.strip()
                 col_num_str = col_num_str.strip()
-                level_str = level_str.strip()
+                severity_str = level_str.strip()
                 text = text.strip()
                 line_num = int(line_num_str)
                 col_num = int(col_num_str)
-                level = level_str.lower()
-                if level == 'error' and text.startswith(lean3_has_state_message):
+                severity = severity_str.lower()
+                if severity == 'error' and text.startswith(lean3_has_state_message):
                     unparsed_state = text[len(lean3_has_state_message):]
                     state = self.parse_proof_state(unparsed_state)
                 else:
-                    final_messages.append(Message(level, full_path, line_num, col_num, text))
+                    final_messages.append(Message(severity, text, line_num, col_num))
             except:
                 msg_unparsed.append(msg)
                 pass
         if len(final_messages) > 0:
             # Sort messages by line number
-            final_messages.sort(key=lambda msg: msg.line_num)
-        last_line_num = 0 if len(final_messages) == 0 else final_messages[-1].line_num
+            final_messages.sort(key=lambda msg: msg.begin_line_num)
+        last_line_num = 0 if len(final_messages) == 0 else final_messages[-1].begin_line_num
         # Now add the unparsed messages
         for msg in msg_unparsed:
-            final_messages.append(Message('info', full_path, last_line_num, 0, msg))
+            final_messages.append(Message('info', msg, last_line_num, 0))
         # re-sort
-        final_messages.sort(key=lambda msg: msg.line_num)
+        final_messages.sort(key=lambda msg: msg.begin>line_num)
         return VerificationResult(state, final_messages)
 
     def verify(
@@ -142,15 +142,15 @@ class Lean3Verifier(Verifier):
     def parse_goal(self, goal_str: str):
         goal_str = goal_str.strip()
         goal = ""
-        hyps_goals = re.findall(lean3_goal_regex, goal_str, re.MULTILINE)
-        assert len(hyps_goals) == 1, f"Found more than one goal in the goal string: {goal_str}"
-        hypotheses_str, goal = hyps_goals[0]
+        hyps_infs = re.findall(lean3_goal_regex, goal_str, re.MULTILINE)
+        assert len(hyps_infs) == 1, f"Found zero or more than one goal in the goal string: {goal_str}"
+        hypotheses_str, inference = hyps_infs[0]
         hypotheses_str = hypotheses_str.strip()
-        goal = goal.strip()
+        inference = inference.strip()
         hypotheses = [hyp.rstrip(',') for hyp in hypotheses_str.split("\n")]
         # Get rid of all the empty hypotheses
         hypotheses = [hyp for hyp in hypotheses if len(hyp) > 0]
-        goal = Goal(hypotheses, goal)
+        goal = Goal(hypotheses, inference)
         return goal
 
 # Unit test code
