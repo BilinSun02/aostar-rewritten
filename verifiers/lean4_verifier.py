@@ -23,9 +23,15 @@ DEFAULT_LEAN_WORKSPACE = '/share/data/mathzero/billion/2dsmodel/DeepSeek-Prover-
 
 class Lean4Verifier(Verifier):
     def verify(self, proof: str) -> VerificationResult:
-        pass
+        response = self.verify_lean4_file(proof)
+        return VerificationResult
     # !!!!TODO: implement
     # !!TODO: perhaps better to give Goal-PartialProofArrivingAtGoal pairs
+
+        # Calculate the indentation level (number of leading spaces or tabs)
+        indentation_level = len(last_line) - len(last_line.lstrip())
+
+        return indentation_level
 
     # TODO: attribute
     # Also: message here is diff from other places: explain
