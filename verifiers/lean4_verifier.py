@@ -158,8 +158,7 @@ class Lean4Verifier(Verifier):
 
 
 if __name__ == "__main__":
-    if False:
-        code = """
+    code = """
 -- Definitions about natural numbers and primes
 import Mathlib.Data.Nat.Prime
 
@@ -223,65 +222,36 @@ theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
   · exact pp
 
 """
-        code = """
--- Definitions about natural numbers and primes
-import Mathlib.Data.Nat.Prime
 
--- Mathlib's tactics library
-import Mathlib.Tactic
+    code_lines = code.split("\n")
+    cutoff = 0
+    if False:
+        # Cut off before the proof body.
+        # The output should be something like "unexpected end of input"
+        for i, line in enumerate(code_lines):
+            if ":= by" in line:
+                cutoff = i + 1
+                break
+    if False:
+        # Cut off after the first line of proof
+        # You should see one goal.
+        for i, line in enumerate(code_lines):
+            if "intro N" in line:
+                cutoff = i + 1
+                break
+    if False:
+        # Cut off after proof by induction splits the goal into a base case and an inductive case
+        # You should see two goals.
+        for i, line in enumerate(code_lines):
+            if "constructor" in line:
+                cutoff = i + 1
+                break
+    if True:
+        # Use the full proof.
+        # You should see no goals.
+        cutoff = len(code_lines)
 
--- We want to refer to some theorems about Natural numbers
-open Nat
-
-
--- Define theorem or goal to prove
-theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
-  sorry
-"""
-
-        code = """
-import Mathlib
-import Aesop
-
-set_option maxHeartbeats 0
-
-open BigOperators Real Nat Topology Rat
-
-theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h))
-    (h₂ : b = 30) (h₃ : h = 13 / 2) : v = 65 := by
-  sorry
-"""
-
-        code = """
-import Mathlib
-import Aesop
-
-set_option maxHeartbeats 0
-
-open BigOperators Real Nat Topology Rat
-
-theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h))
-    (h₂ : b = 30) (h₃ : h = 13 / 2) : v = 65 := by
-"""
-
-    code = """
--- Definitions about natural numbers and primes
-import Mathlib.Data.Nat.Prime
-
--- Mathlib's tactics library
-import Mathlib.Tactic
-
--- We want to refer to some theorems about Natural numbers
-open Nat
-
-
--- Define theorem or goal to prove
-theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
-  -- After `by` we write our "tactics" to prove the theorem...
-
-  -- let N be a natural number
-  intro N
-"""
+    code = "\n".join(code.split("\n")[:cutoff])
 
     verifier = Lean4Verifier()
     print(verifier.verify(code))
