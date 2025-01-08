@@ -84,7 +84,7 @@ class Lean4Verifier(Verifier):
                 #"ast" : ast_results,
                 #"verified_code" : code,
             }
-            #result['pass'] = not any(map(lambda m: m['severity'] == 'error', result['messages']))
+            #result['pass'] = not any(list(map(lambda m: m['severity'] == 'error', result['messages'])))
             #result['complete'] = result['pass'] and not result['sorries'] and not any("declaration uses 'sorry'" in warning['data'] or 'failed' in warning['data'] for warning in result['warnings'])
         except:
             #result = {
@@ -101,7 +101,7 @@ class Lean4Verifier(Verifier):
     def parse_repl_result(self, result: dict[str, Any]) -> VerificationResult:
         messages : List[Message] = []
         state = EmptyProofState
-        for m in result[messages]:
+        for m in result['messages']:
             if m['severity'] == 'error' and m['data'].startswith(lean4_has_state_message):
                 unparsed_state = m['data'][len(lean4_has_state_message):]
                 # I don't expect multiple proof state messages to occur
@@ -111,18 +111,22 @@ class Lean4Verifier(Verifier):
                     assert False
                 state = self.parse_proof_state(unparsed_state)
             else:
+                assert isinstance(m['pos']['line'], int)
+                    # I did assume this to be given
+                endPos = m.get('endPos')
+                    # On the other hand, I'm fine with m['endPos'] not being available.
                 messages.append(Message(
                     m['severity'],
                     m['data'],
                     m['pos']['line'],
                     m['pos']['column'],
-                    m['endPos']['line'],
-                    m['endPos']['column'],
+                    endPos and endPos.get('line'), # endPos.get('line') if endPos else endPos
+                    endPos and endPos.get('column'),
                 ))
 
         return VerificationResult(state, messages)
                 
-    def parse_proof_state( # !!!!! TODO: adapt
+    def parse_proof_state(
         self,
         proof_state_str: str
     ) -> ProofState:
@@ -130,10 +134,10 @@ class Lean4Verifier(Verifier):
         if lean4_proof_state_separator not in proof_state_str:
             raise ValueError(f"Invalid {proof_state_str=}")
         goal_strs = proof_state_str.split(lean4_proof_state_boundary)
-        goals = map(self.parse_goal, goal_strs)
+        goals = list(map(self.parse_goal, goal_strs))
         return ProofState(proof_state_str, goals)
 
-    def parse_goal(self, goal_str: str) -> Goal: # !!!!! TODO: adapt
+    def parse_goal(self, goal_str: str) -> Goal:
         goal_str = goal_str.strip()
         inference = ""
         hyps_infs = re.findall(lean4_goal_regex, goal_str, re.MULTILINE)
@@ -146,6 +150,11 @@ class Lean4Verifier(Verifier):
         hypotheses = [hyp for hyp in hypotheses if len(hyp) > 0]
         goal = Goal(hypotheses, inference)
         return goal
+            # !!TODO: sometimes garbage goes into `hypotheses`,
+            # e.g. "case h.left", which is the *name* of a subgoal.
+            # I have yet to figure out how to sift away this
+            # other than hardcoding the program to discard anything
+            # containing "case", presumably a bad idea.
 
 
 if __name__ == "__main__":
@@ -230,7 +239,7 @@ theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
   sorry
 """
 
-    code = """
+        code = """
 import Mathlib
 import Aesop
 
@@ -242,5 +251,37 @@ theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁
     (h₂ : b = 30) (h₃ : h = 13 / 2) : v = 65 := by
   sorry
 """
+
+        code = """
+import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h))
+    (h₂ : b = 30) (h₃ : h = 13 / 2) : v = 65 := by
+"""
+
+    code = """
+-- Definitions about natural numbers and primes
+import Mathlib.Data.Nat.Prime
+
+-- Mathlib's tactics library
+import Mathlib.Tactic
+
+-- We want to refer to some theorems about Natural numbers
+open Nat
+
+
+-- Define theorem or goal to prove
+theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
+  -- After `by` we write our "tactics" to prove the theorem...
+
+  -- let N be a natural number
+  intro N
+"""
+
     verifier = Lean4Verifier()
     print(verifier.verify(code))
