@@ -4,6 +4,7 @@ import re
 import typing
 from subprocess import Popen, PIPE, STDOUT
 from typing import Tuple
+from .language import ProofState, EmptyProofState
 
 lean3_proof_state_separator = "⊢"
 lean3_proof_state_regex = r"((\d+) goals)*([\s|\S]*?)\n\n"
@@ -76,7 +77,8 @@ class Lean3Verifier(Verifier):
                 col_num = int(col_num_str)
                 level = level_str.lower()
                 if level == 'error' and text.startswith(lean3_has_state_message):
-                    state = text[len(lean3_has_state_message):]
+                    unparsed_state = text[len(lean3_has_state_message):]
+                    state = self.parse_proof_state(unparsed_state)
                 else:
                     final_messages.append(Message(level, full_path, line_num, col_num, text))
             except:
@@ -103,16 +105,16 @@ class Lean3Verifier(Verifier):
             temp_file.seek(0)
             response = self.run_file_on_lean(temp_file.name)
             return (
-                self.parse_proof_state_human_readable(response.state),
+                self.parse_proof_state(response.state),
                 response.messages
             )
 
-    def parse_proof_state_human_readable(
+    def parse_proof_state(
         self,
         proof_state_str: str
     ) -> ProofState:
         if not proof_state_str or proof_state_str == "no goals":
-            return ProofState.empty()
+            return EmptyProofState
         if lean3_proof_state_separator not in proof_state_str:
             raise ValueError(f"Invalid {proof_state_str=}")
         proof_state_str = proof_state_str.strip()
@@ -154,8 +156,8 @@ class Lean3Verifier(Verifier):
 # Unit test code
 if __name__ == "__main__":
     v = Lean3Verifier()
-    #print(v.parse_proof_state_human_readable("test⊢string"))
-    #print(type(v.parse_proof_state_human_readable("test⊢string")))
+    #print(v.parse_proof_state("test⊢string"))
+    #print(type(v.parse_proof_state("test⊢string")))
 
     my_proof = """ # Test error outputs
 theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :=

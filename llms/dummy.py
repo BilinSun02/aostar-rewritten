@@ -3,7 +3,7 @@ from .common import LLMAccess
 class DummyLLMAccess(LLMAccess):
     incurs_cost: bool = False
 
-    def __init__(self, 
+    def __init__(self,
         model_name: str,
         budget_in_cents: int = 100,
         dummy_output: str = "Dummy LLM output"

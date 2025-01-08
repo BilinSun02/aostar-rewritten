@@ -106,9 +106,9 @@ def expand(
         case ANDNode(proof_step=p):
             node.expanded = True
 
-            run_lean_proof_context, run_lean_messages = verifier.verify(
-                language.complete_proof(proof_so_far + p)
-            )
+            verification_result = verifier.verify(language.complete_proof(proof_so_far + p))
+            run_lean_proof_context = verification_result.state
+            run_lean_messages = verification_result.messages
             logger.debug(f"Running the tactic {p} returns\n" +\
                         f"{run_lean_messages=} and\n" +\
                         f"{run_lean_proof_context=}")
