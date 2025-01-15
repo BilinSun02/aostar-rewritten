@@ -441,7 +441,9 @@ if __name__ == "__main__":
             from verifiers.lean3_server import Lean3Server as TestServer
             match test_difficulty:
                 case "easy":
-                    theorem_statement = "theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :="
+                    theorem_statement = """theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :=
+begin
+"""
                 case "hard":
                     theorem_statement = """
 import data.nat.prime
