@@ -29,6 +29,8 @@ class Lean3ProofSegment(ProofSegment):
         else:
             imports = self.imports + other.imports
 
+        # Lean 3 does not care about indentation.
+        # Just concatenate by newline.
         if self.tactics and not self.tactics.endswith('\n'):
             tactics = self.tactics + '\n' + other.tactics
         else:
@@ -51,7 +53,7 @@ class Lean3Server(VerifierLanguage):
     verifier: Verifier = Lean3Verifier()
 
     @staticmethod
-    def normalize_comments_and_indentation(tactics_str: str) -> str:
+    def standardize_comments_and_indentation(tactics_str: str) -> str:
         """
         Convert comments into the `--` format,
         and remove all indentation before `--` or actual tactics.
@@ -185,7 +187,7 @@ be runnable as a Lean statement and is not in natural language.)
 --[EOF]
 """
         response = llm_access.complete(message_body)   
-        response = self.normalize_comments_and_indentation(response)
+        response = self.standardize_comments_and_indentation(response)
         # Get lines up to the first non-comment
         response_lines = response.splitlines()
         response_lines_up_to_first_non_comment = []

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 from .language import *
-from .verifier import Verifier, ProofState, Message
+from .verifier import Verifier
 from .lean4_verifier import Lean4Verifier
 from llms.prompts import *
 from llms.common import LLMAccess
@@ -11,6 +11,11 @@ from .string_operations import replace_at_indices
 
 lean4_comment_or_blank_line_pattern = r'^\s*(--.*)?$'
 
+# The required Lean 4 theorem statement "initial segment" format:
+# Following `theorem ... := by`, there must be the line ` skip`.
+# This no-op serves two purposes: (1) the theorem statement needs
+# it to compile successfully on the Lean 4 repl; (2) It sets the
+# indentation (to be one space).
 @dataclass(frozen=True)
 class Lean4ProofSegment(ProofSegment):
     tactics: str
@@ -24,7 +29,21 @@ class Lean4ProofSegment(ProofSegment):
     @property
     def last_line_indentation(self) -> str:
         # Find the last non-empty, non-comment line of self.tactics
-        return re.match(r"^\s*", self.tactics.split('\n')[-1]).group(0)
+        for line in reversed(self.tactics.splitlines()):
+            if not re.match(
+                lean4_comment_or_blank_line_pattern,
+                line,
+                re.MULTILINE
+            ):
+                return re.match(r"^\s*", line).group(0)
+
+        return ""
+
+    def normalize_indentation(self, other_tactics_str) -> str:
+        return '\n'.join(map(
+            lambda line: self.last_line_indentation + line,
+            other_tactics_str.splitlines()
+        ))
 
     def __add__(self, other: 'Lean4ProofSegment') -> 'Lean4ProofSegment':
         assert isinstance(other, Lean4ProofSegment)
@@ -34,10 +53,11 @@ class Lean4ProofSegment(ProofSegment):
         else:
             imports = self.imports + other.imports
 
+        other_tactics_str = self.normalize_indentation(other.tactics)
         if self.tactics and not self.tactics.endswith('\n'):
-            tactics = self.tactics + '\n' + other.tactics
+            tactics = self.tactics + '\n' + other_tactics_str
         else:
-            tactics = self.tactics + other.tactics
+            tactics = self.tactics + other_tactics_str
 
         return Lean4ProofSegment(tactics, imports)
 
@@ -65,7 +85,7 @@ class Lean4Server(VerifierLanguage):
     #    return indentation_string
 
     @staticmethod
-    def normalize_comments_and_indentation(tactics_str: str) -> str:
+    def standardize_comments_and_indentation(tactics_str: str) -> str:
         """
         Convert comments into the `--` format,
         and remove all indentation before `--` or actual tactics.
@@ -124,7 +144,7 @@ class Lean4Server(VerifierLanguage):
             # One part being either a brace or a string w/o braces
             parts = []
             current_part = ''
-            
+
             for char in stripped_line:
                 if char in ['{', '}']:
                     if current_part:
@@ -133,7 +153,7 @@ class Lean4Server(VerifierLanguage):
                     parts.append(char)
                 else:
                     current_part += char
- 
+
             if current_part:
                 parts.append(current_part)
 
@@ -187,7 +207,7 @@ be runnable as a Lean statement and is not in natural language.)
 --[EOF]
 """
         response = llm_access.complete(message_body)   
-        response = self.normalize_comments_and_indentation(response)
+        response = self.standardize_comments_and_indentation(response)
         # Get lines up to the first non-comment
         response_lines = response.splitlines()
         response_lines_up_to_first_non_comment = []
