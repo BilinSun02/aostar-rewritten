@@ -23,15 +23,15 @@ class Lean3ProofSegment(ProofSegment):
         # !!!TODO: check the indentation of `other.tactics`
         assert isinstance(other, Lean3ProofSegment)
 
-        if self.imports and self.imports.endswith('\n'):
-            imports = self.imports + other.imports
-        else:
+        if self.imports and not self.imports.endswith('\n'):
             imports = self.imports + '\n' + other.imports
-
-        if self.tactics and self.tactics.endswith('\n'):
-            tactics = self.tactics + other.tactics
         else:
+            imports = self.imports + other.imports
+
+        if self.tactics and not self.tactics.endswith('\n'):
             tactics = self.tactics + '\n' + other.tactics
+        else:
+            tactics = self.tactics + other.tactics
 
         return Lean3ProofSegment(tactics, imports)
 

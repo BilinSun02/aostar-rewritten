@@ -22,15 +22,15 @@ class Lean4ProofSegment(ProofSegment):
         # !!!TODO: check the indentation of `other.tactics`
         assert isinstance(other, Lean4ProofSegment)
 
-        if self.imports and self.imports.endswith('\n'):
-            imports = self.imports + other.imports
-        else:
+        if self.imports and not self.imports.endswith('\n'):
             imports = self.imports + '\n' + other.imports
-
-        if self.tactics and self.tactics.endswith('\n'):
-            tactics = self.tactics + other.tactics
         else:
+            imports = self.imports + other.imports
+
+        if self.tactics and not self.tactics.endswith('\n'):
             tactics = self.tactics + '\n' + other.tactics
+        else:
+            tactics = self.tactics + other.tactics
 
         return Lean4ProofSegment(tactics, imports)
 
@@ -96,6 +96,7 @@ be runnable as a Lean statement and is not in natural language.)
         # Get lines up to the first non-comment
         response_lines = response.splitlines()
         comment_or_blank_line_pattern = r'^\s*(--.*)?$'
+        #!!TODO: this still doesn't match block comments. Add support for that.
         response_lines_up_to_first_non_comment = []
         for line in response_lines:
             response_lines_up_to_first_non_comment.append(line)
