@@ -1,5 +1,5 @@
 import os, datetime, argparse, pickle, traceback, re, logging
-from typing import Callable, Final, Tuple
+from typing import Callable, Tuple
 from threading import Thread
 
 from data_structures import *
@@ -9,6 +9,9 @@ from search_tree_visualization import present_search_tree
 from llms.common import LLMAccess, CostCircuitBreak
 
 if __name__ == "__main__":
+    from typing import Final, Literal
+    from llms.gpt_access import GptAccess
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--log_path', type=str, default='logs/proof_search.log', help='Where to store the log')
     parser.add_argument('--load_checkpoint_path', type=str, default=None, help='Where to load the search tree')
@@ -301,7 +304,6 @@ def ao_star(
     else:
         # Remove blank lines at the end of the string, so logs are more concise
         theorem_statement = re.sub(r'\s*\n\s*$', '', theorem_statement, flags=re.MULTILINE)
-        theorem_statement += "\nbegin"
         initial_proof_step = language.proof_segment_type(theorem_statement)
         root = ANDNode(proof_step = initial_proof_step)
         root.root = root
@@ -440,21 +442,44 @@ def collect_solution(
 
 if __name__ == "__main__":
     # Test driving code
-    from verifiers.lean3_verifier import Lean3Verifier
-    from verifiers.lean3_server import Lean3Server
-    from llms.gpt_access import GptAccess
+    test_language : Literal["Lean 3", "Lean 4"] = "Lean 3"
+    test_difficulty : Literal["easy", "hard"] = "easy"
 
-    theorem_statement = "theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :="
-    #theorem_statement = "theorem inequality_chain (a b c d: ℕ) (h₀ : a ≤ b) (h₁ : b ≤ c) (h₂ : c ≤ d) : a ≤ d :="
-#    theorem_statement = """import data.nat.basic
-#theorem amc12a_2015_p10
-#  (x y : ℤ)
-#  (h₀ : 0 < y)
-#  (h₁ : y < x)
-#  (h₂ : x + y + (x * y) = 80) :
-#  x = 26 :=
-#"""
+    match test_language:
+        case "Lean 3":
+            from verifiers.lean3_verifier import Lean3Verifier as TestVerifier
+            from verifiers.lean3_server import Lean3Server as TestServer
+            match test_difficulty:
+                case "easy":
+                    theorem_statement = "theorem a_plus_b_b_plus_a (a b : ℕ) : a + b = b + a :="
+                case "hard":
+                    theorem_statement = """
+import data.nat.prime
+import tactic
+open nat
+theorem infinitude_of_primes (N : ℕ) : ∃ p ≥ N, nat.prime p :=
+begin
+"""
+        case "Lean 4":
+            from verifiers.lean4_verifier import Lean4Verifier as TestVerifier
+            from verifiers.lean4_server import Lean4Server as TestServer
+            match test_difficulty:
+                case "easy":
+                    theorem_statement = """theorem a_plus_b_b_plus_a (a b : Nat) : a + b = b + a := by
+    skip
+"""
+                case "hard":
+                    theorem_statement = """
+import Mathlib.Data.Nat.Prime
+import Mathlib.Tactic
+open Nat
+theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
+    skip
+"""
 
+    # The following define "fixed-width BFS":
+    # The algorithm will expand the tree breadth-first,
+    # until every node has `BFS_width` many children.
     BFS_width = 3
 
     def cost(node: Node) -> float:
@@ -494,9 +519,9 @@ if __name__ == "__main__":
             case _:
                 raise NotImplementedError(f"Unable to put an estimate on {node=}")
 
-    language = Lean3Server()
+    language = TestServer()
     llm_access = GptAccess("gpt-4o-mini")
-    verifier = Lean3Verifier()
+    verifier = TestVerifier()
 
     print(ao_star(
         theorem_statement,

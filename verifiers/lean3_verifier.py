@@ -4,7 +4,7 @@ import re
 import typing
 from subprocess import Popen, PIPE, STDOUT
 from typing import Tuple, List, Optional
-from .language import ProofState, EmptyProofState
+from .verifier import ProofState, EmptyProofState
 
 lean3_proof_state_separator = "⊢"
 lean3_proof_state_regex = r"((\d+) goals)*([\s|\S]*?)\n\n"
