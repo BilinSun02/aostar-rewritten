@@ -109,7 +109,8 @@ def expand(
         case ANDNode(proof_step=p):
             node.expanded = True
 
-            verification_result = verifier.verify(language.close_proof(proof_so_far + p))
+            proof_so_far_closed = language.close_proof(proof_so_far + p)
+            verification_result = verifier.verify(proof_so_far_closed)
             run_lean_proof_context = verification_result.state
             run_lean_messages = verification_result.messages
             logger.debug(f"Running the tactic {p} returns\n" +\
@@ -122,7 +123,7 @@ def expand(
                 logger.info(
                     f"The tactic {p} failed to compile. Error messages:\n" +
                     "\n".join(msg.text for msg in node.error_messages) + '\n' +
-                    "Full proof:\n" + str(proof_so_far) + '\n'
+                    "Full proof:\n" + str(proof_so_far_closed) + '\n'
                 )
                 node.detailed_state = NodeDetailedState.DOESNT_COMPILE
             else:

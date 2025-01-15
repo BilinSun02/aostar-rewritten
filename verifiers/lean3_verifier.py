@@ -3,7 +3,7 @@ import os, tempfile
 import re
 import typing
 from subprocess import Popen, PIPE, STDOUT
-from typing import Tuple, List, Optional
+from typing import List
 from .verifier import ProofState, EmptyProofState, VerificationResult
 
 lean3_proof_state_separator = "⊢"
@@ -63,7 +63,7 @@ class Lean3Verifier(Verifier):
         messages = output.split(abs_path)
         messages = [msg for msg in messages if len(msg) > 0] # Remove empty strings
         final_messages : typing.List[Message] = []
-        state : Optional[ProofState] = None
+        state :ProofState = EmptyProofState
         msg_unparsed : List[str] = []
         for msg in messages:
             # Get rid of line number and column number
