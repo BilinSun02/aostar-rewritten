@@ -103,11 +103,7 @@ class Lean3Verifier(Verifier):
             # Use the temporary file
             temp_file.write(proof.encode('utf-8'))
             temp_file.seek(0)
-            response = self.run_file_on_lean(temp_file.name)
-            return VerificationResult(
-                self.parse_proof_state(response.state),
-                response.messages
-            )
+            return self.run_file_on_lean(temp_file.name)
 
     def parse_proof_state(
         self,
