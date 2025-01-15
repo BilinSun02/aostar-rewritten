@@ -4,7 +4,7 @@ import re
 import typing
 from subprocess import Popen, PIPE, STDOUT
 from typing import Tuple, List, Optional
-from .verifier import ProofState, EmptyProofState
+from .verifier import ProofState, EmptyProofState, VerificationResult
 
 lean3_proof_state_separator = "⊢"
 lean3_proof_state_regex = r"((\d+) goals)*([\s|\S]*?)\n\n"
@@ -98,13 +98,13 @@ class Lean3Verifier(Verifier):
     def verify(
         self,
         proof: str,
-    ) -> Tuple[ProofState, List[Message]]:
+    ) -> VerificationResult:
         with tempfile.NamedTemporaryFile() as temp_file:
             # Use the temporary file
             temp_file.write(proof.encode('utf-8'))
             temp_file.seek(0)
             response = self.run_file_on_lean(temp_file.name)
-            return (
+            return VerificationResult(
                 self.parse_proof_state(response.state),
                 response.messages
             )
