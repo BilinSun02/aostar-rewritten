@@ -95,11 +95,11 @@ be runnable as a Lean statement and is not in natural language.)
         response = llm_access.complete(message_body)   
         # Get lines up to the first non-comment
         response_lines = response.splitlines()
-        comment_line_pattern = r'^\s*--.*$'
+        comment_or_blank_line_pattern = r'^\s*(--.*)?$'
         response_lines_up_to_first_non_comment = []
         for line in response_lines:
             response_lines_up_to_first_non_comment.append(line)
-            if line and not re.match(comment_line_pattern, line):
+            if line and not re.match(comment_or_blank_line_pattern, line):
                 break
         # TODO: instead of just getting one line as such,
         # try to find as many lines as runnable.
