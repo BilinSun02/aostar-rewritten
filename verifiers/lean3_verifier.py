@@ -92,7 +92,7 @@ class Lean3Verifier(Verifier):
         for msg in msg_unparsed:
             final_messages.append(Message('info', msg, last_line_num, 0))
         # re-sort
-        final_messages.sort(key=lambda msg: msg.begin>line_num)
+        final_messages.sort(key=lambda msg: msg.begin_line_num>line_num)
         return VerificationResult(state, final_messages)
 
     def verify(
