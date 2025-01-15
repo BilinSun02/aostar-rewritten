@@ -222,13 +222,6 @@ def find(
         nodes_temporarily_marked_NO_PROGRESS: List[Tuple[Node, NodeDetailedState]] = list()
         match node:
             case ANDNode(proof_step=s):
-                # !!TODO: check how to deal with these
-                #if node.parents:
-                #    # Unless the current node is the root,
-                #    # the tactic here needs to be indented
-                #    # TODO: check my assumption that all lines are indented by 2
-                #    s = standardize_indentation(s, 2)
-                #s += "\n" # for good measure
                 proof_so_far += s
             case ORNode(goal=g):
                 def disable_descendants_with_goal(node: Node, goal: Goal) -> None:
@@ -407,10 +400,6 @@ def collect_solution(
         assert node.solved, f"{node=} is not solved"
         match node:
             case ANDNode(proof_step=proof_step):
-                # !!TODO: reconsider how to deal with indentations
-                ## Unless the current node is the root,
-                ## the tactic here needs to be indented
-                #proof_step = standardize_indentation(proof_step, 4)
                 for child in node.children:
                     proof_so_far = collect_solution_segment(child, proof_so_far)
                     # The recursive call will check the children are each solved

@@ -1,12 +1,15 @@
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Tuple
 
 from .language import *
 from .verifier import Verifier
 from .lean3_verifier import Lean3Verifier
 from llms.prompts import *
 from llms.common import LLMAccess
+from .string_operations import replace_at_indices
+
+lean3_comment_or_blank_line_pattern = r'^\s*(--.*)?$'
 
 @dataclass(frozen=True)
 class Lean3ProofSegment(ProofSegment):
@@ -19,8 +22,6 @@ class Lean3ProofSegment(ProofSegment):
         return Lean3ProofSegment("", "")
 
     def __add__(self, other: 'Lean3ProofSegment') -> 'Lean3ProofSegment':
-        # Concatenate two proof steps together into one proof step.
-        # !!!TODO: check the indentation of `other.tactics`
         assert isinstance(other, Lean3ProofSegment)
 
         if self.imports and not self.imports.endswith('\n'):
@@ -48,6 +49,92 @@ class Lean3Server(VerifierLanguage):
     language_name: str = "Lean 3"
     proof_segment_type: Type[ProofSegment] = Lean3ProofSegment
     verifier: Verifier = Lean3Verifier()
+
+    @staticmethod
+    def normalize_comments_and_indentation(tactics_str: str) -> str:
+        """
+        Convert comments into the `--` format,
+        and remove all indentation before `--` or actual tactics.
+        (Spaces will need to be added back later to assemble into a proof.)
+        """
+
+        # First work on the `/- ... -/` comments, which have strange behaviros:
+        # Unlike the "greedy" manner of C where `/* /* */` is considered closed,
+        # Lean 3 and 4 do not consider `/- /- -/` closed, until it's completed
+        # to `/- /- -/ -/`.
+        block_comment_level = 0
+        idx = 1
+        replacements : List[Tuple[Tuple[int, int], str]] = []
+        while idx < len(tactics_str):
+            if tactics_str[idx-1:idx+1] == "/-":
+                block_comment_level += 1
+                replacements.append(((idx-1, idx+1), "--"))
+                idx += 2
+            elif tactics_str[idx-1:idx+1] == "-/":
+                #assert block_comment_level > 0
+                    # Maybe not part of a comment?
+                if block_comment_level == 1:
+                    # Closing block. A tactic may ensue on the same line.
+                    # We just break the possible tactic onto its own line
+                    # to avoid dealing with the weird indentation system of
+                    # Lean, which counts "-/" towards indentation.
+                    block_comment_level -= 1
+                    replacements.append(((idx-1, idx+1), "\n"))
+                elif block_comment_level > 1:
+                    block_comment_level -= 1
+                    replacements.append(((idx-1, idx+1), ""))
+                idx += 2
+            elif block_comment_level == 0 and tactics_str[idx-1:idx+1] == "--":
+                # Any subsequent `/-` in this line should be ignored
+                while idx < len(tactics_str) and tactics_str[idx] != '\n':
+                    idx += 1
+            elif block_comment_level > 0 and tactics_str[idx-1] == '\n':
+                replacements.append(((idx, idx), "--"))
+                idx += 1
+            else:
+                idx += 1
+
+        assert block_comment_level == 0, "Block comments not closed"
+        tactics_str = replace_at_indices(tactics_str, replacements)
+
+        # Now normalize the indentation
+        indented_tactics = []
+        indent_level = 0
+        indent_space = ' '  # Single space works for Lean 4
+
+        # Split the source code into lines
+        lines = tactics_str.splitlines()
+
+        for line in lines:
+            stripped_line = line.strip()
+            # One part being either a brace or a string w/o braces
+            parts = []
+            current_part = ''
+ 
+            for char in stripped_line:
+                if char in ['{', '}']:
+                    if current_part:
+                        parts.append(current_part)
+                        current_part = ''
+                    parts.append(char)
+                else:
+                    current_part += char
+
+            if current_part:
+                parts.append(current_part)
+
+            for part in parts:
+                part = part.strip()
+                if part == '{':
+                    indented_tactics.append(indent_space * indent_level + '{')
+                    indent_level += 1
+                elif part == '}':
+                    indent_level -= 1
+                    indented_tactics.append(indent_space * indent_level + '}')
+                elif part:  # Non-empty part (not a brace)
+                    indented_tactics.append(indent_space * indent_level + part)
+
+        return '\n'.join(indented_tactics)
 
     def close_proof(self, proof_segment: Lean3ProofSegment) -> str:
         proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
@@ -94,23 +181,27 @@ be runnable as a Lean statement and is not in natural language.)
 {proof_segment.tactics}
 /-
 {comment}
-[END]
 -/
+--[EOF]
 """
         response = llm_access.complete(message_body)   
+        response = self.normalize_comments_and_indentation(response)
         # Get lines up to the first non-comment
         response_lines = response.splitlines()
-        comment_line_pattern = r'^\s*--.*$'
         response_lines_up_to_first_non_comment = []
         for line in response_lines:
             response_lines_up_to_first_non_comment.append(line)
-            if line and not re.match(comment_line_pattern, line):
+            if line and not re.match(lean3_comment_or_blank_line_pattern, line):
                 break
         # TODO: instead of just getting one line as such,
         # try to find as many lines as runnable.
 
         tactics = '\n'.join(response_lines_up_to_first_non_comment)
-        imports = '\n'.join(re.findall(r'^\s*--\[IMPORT\].*$', tactics, re.MULTILINE))
+        imports = '\n'.join(re.findall(
+            r'^\s*--\[IMPORT\].*$',
+            tactics,
+        re.MULTILINE))
+        # !!TODO: check if import detection works
 
         ## Some empirical patchwork
         ## The LLM may end the completed part also with "--[END]"

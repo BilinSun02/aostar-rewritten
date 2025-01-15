@@ -18,7 +18,10 @@ class ProofSegment(ABC):
 
     @abstractmethod
     def __add__(self, other: 'ProofSegment') -> 'ProofSegment':
-        #Concatenate two proof steps together into one proof step.
+        """
+        Concatenate two proof steps together into one proof step.
+        Responsible for adding line breaks and normalizing indentation.
+        """
         assert isinstance(other, ProofSegment)
         pass
 
