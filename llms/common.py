@@ -39,7 +39,7 @@ class LLMAccess(ABC):
     @property
     def cost_stats(self) -> str:
         if self.incurs_cost:
-            return f"{self.usage['prompt_tokens']} prompt tokens and" +\
+            return f"{self.usage['prompt_tokens']} prompt tokens and " +\
                    f"{self.usage['completion_tokens']} completion tokens " +\
                    f"incurred ${self.cost_in_cents/100:.2f} dollars in cost."
         else:

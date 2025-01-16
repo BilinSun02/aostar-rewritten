@@ -16,10 +16,10 @@ class CustomFormatter(logging.Formatter):
     def format(self, record):
         if record.levelno >= logging.WARNING:
             # Format the message to include file name and line number
-            fmt = '%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+            fmt = '%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s '
         else:
             # Use the default format for other log levels
-            fmt = '%(asctime)s - %(levelname)s - %(message)s'
+            fmt = '%(asctime)s - %(levelname)s - %(message)s '
 
         formatter = logging.Formatter(fmt)
         return formatter.format(record)

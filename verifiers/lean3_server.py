@@ -203,7 +203,6 @@ be runnable as a Lean statement and is not in natural language.)
             r'^\s*--\[IMPORT\].*$',
             tactics,
         re.MULTILINE))
-        # !!TODO: check if import detection works
 
         ## Some empirical patchwork
         ## The LLM may end the completed part also with "--[END]"

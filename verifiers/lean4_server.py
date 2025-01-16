@@ -210,20 +210,37 @@ be runnable as a Lean statement and is not in natural language.)
         response = self.standardize_comments_and_indentation(response)
         # Get lines up to the first non-comment
         response_lines = response.splitlines()
-        response_lines_up_to_first_non_comment = []
-        for line in response_lines:
-            response_lines_up_to_first_non_comment.append(line)
+        non_empty_cutoff : int = None
+        compile_cutoff : int = None
+        for idx, line in enumerate(response_lines):
             if line and not re.match(lean4_comment_or_blank_line_pattern, line):
+                non_empty_cutoff = idx + 1
                 break
-        # TODO: instead of just getting one line as such,
-        # try to find as many lines as runnable.
+        if non_empty_cutoff is None:
+            raise ValueError("No tactic in LLM response.")
+                # We could just try prompting the LLM again,
+                # but more likely something is wrong with the LLM,
+                # with the prompt, or with parsing.
+        else:
+            for idx in range(len(response_lines), non_empty_cutoff, -1):
+                test_proof = '\n'.join(response_lines[:idx])
+                test_result = self.verifier.verify(test_proof)
+                if not any(map(
+                    lambda m: m['severity'] == 'error',
+                    test_result.messages
+                )):
+                    compile_cutoff = idx
+                    break
+            if compile_cutoff is None:
+                # Does not compile at all. Just pass the full response
+                # and the search algorithm will know this attempts fails.
+                compile_cutoff = len(response_lines)
 
-        tactics = '\n'.join(response_lines_up_to_first_non_comment)
+        tactics = '\n'.join(response_lines[:compile_cutoff])
         imports = '\n'.join(re.findall(
             r'^\s*--\[IMPORT\].*$',
             tactics,
         re.MULTILINE))
-        # !!TODO: check if import detection works
 
         ## Some empirical patchwork
         ## The LLM may end the completed part also with "--[END]"
