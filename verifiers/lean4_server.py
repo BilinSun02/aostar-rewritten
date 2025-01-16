@@ -226,7 +226,7 @@ be runnable as a Lean statement and is not in natural language.)
                 test_proof = '\n'.join(response_lines[:idx])
                 test_result = self.verifier.verify(test_proof)
                 if not any(map(
-                    lambda m: m['severity'] == 'error',
+                    lambda m: m.severity == 'error',
                     test_result.messages
                 )):
                     compile_cutoff = idx
