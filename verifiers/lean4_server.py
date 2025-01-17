@@ -85,6 +85,19 @@ class Lean4Server(VerifierLanguage):
     #    return indentation_string
 
     @staticmethod
+    def first_line_indentation(tactics_str: str) -> str:
+        # Find the first non-empty, non-comment line of self.tactics
+        for line in tactics_str.splitlines():
+            if not re.match(
+                lean4_comment_or_blank_line_pattern,
+                line,
+                re.MULTILINE
+            ):
+                return re.match(r"^\s*", line).group(0)
+
+        return ""
+
+    @staticmethod
     def standardize_comments_and_indentation(tactics_str: str) -> str:
         """
         Convert comments into the `--` format,
@@ -136,10 +149,12 @@ class Lean4Server(VerifierLanguage):
         indent_level = 0
         indent_space = ' '  # Single space works for Lean 4
 
-        # Split the source code into lines
         lines = tactics_str.splitlines()
 
         for line in lines:
+            if re.match(lean4_comment_or_blank_line_pattern, line):
+                indented_tactics.append(line)
+                continue
             stripped_line = line.strip()
             # One part being either a brace or a string w/o braces
             parts = []
@@ -207,6 +222,9 @@ be runnable as a Lean statement and is not in natural language.)
 --[EOF]
 """
         response = llm_access.complete(message_body)   
+        if "·" in response:
+            raise NotImplementedError("LLM response contains '·'. \
+                                      We can't parse this yet.")
         response = self.standardize_comments_and_indentation(response)
         # Get lines up to the first non-comment
         response_lines = response.splitlines()

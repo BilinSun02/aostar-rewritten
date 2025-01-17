@@ -109,6 +109,7 @@ class GptAccess(LLMAccess):
             messages[0]["content"] = """Complete the following text.
 Return raw text that can be simply concatenated with the original text.
 Do not use MarkDown formatting etc. if they interfere with raw text concatenation.
+Do not repeat any parts of the original text.
 """
             messages[1]["content"] = prompt
             resp = self.complete_chat(
