@@ -259,9 +259,10 @@ be runnable as a Lean statement and is not in natural language.)
 
         tactics = '\n'.join(response_lines[:compile_cutoff])
         imports = '\n'.join(re.findall(
-            r'^\s*--\[IMPORT\].*$',
+            r'^.*(?<=--\[IMPORT\])(.*?)$',
             tactics,
-        re.MULTILINE))
+            re.MULTILINE
+        ))
 
         ## Some empirical patchwork
         ## The LLM may end the completed part also with "--[END]"
