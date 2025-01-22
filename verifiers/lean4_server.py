@@ -155,35 +155,38 @@ class Lean4Server(VerifierLanguage):
             if re.match(lean4_comment_or_blank_line_pattern, line):
                 indented_tactics.append(line)
                 continue
-            stripped_line = line.strip()
-            # One part being either a brace or a string w/o braces
-            parts = []
-            current_part = ''
 
-            for char in stripped_line:
-                if char in ['{', '}']:
-                    if current_part:
-                        parts.append(current_part)
-                        current_part = ''
-                    parts.append(char)
-                else:
-                    current_part += char
+            while line:
+                # If a line has braces in it,
+                # we chop it up into multiple lines so that each brace occupies
+                # a whole line while anything in between braces inhabit their own
+                # lines separate from the lines of the braces.
+                split_regex = r'^(\{|\}|[^\{\}]*)(.*)$'
+                split_line, remainder = re.match(split_regex, line).groups()
+                split_line = split_line.strip()
+                remainder = remainder.strip()
 
-            if current_part:
-                parts.append(current_part)
+                if split_line:
+                    if split_line == '{'\
+                        or (split_line.startswith('|') and "=>" in split_line):
+                        # The latter happens when it's part of casework
+                        indented_tactics.append(
+                            indent_space * indent_level + split_line
+                        )
+                        indent_level += 1
+                    elif split_line == '}':
+                        indent_level -= 1
+                        indented_tactics.append(
+                            indent_space * indent_level + split_line
+                        )
+                    elif split_line:  # Non-empty part (not a brace)
+                        indented_tactics.append(
+                            indent_space * indent_level + split_line
+                        )
+                
+                line = remainder
 
-            for part in parts:
-                part = part.strip()
-                if part == '{':
-                    indented_tactics.append(indent_space * indent_level + '{')
-                    indent_level += 1
-                elif part == '}':
-                    indent_level -= 1
-                    indented_tactics.append(indent_space * indent_level + '}')
-                elif part:  # Non-empty part (not a brace)
-                    indented_tactics.append(indent_space * indent_level + part)
-
-        return '\n'.join(indented_tactics)
+            return '\n'.join(indented_tactics)
 
 
     def close_proof(self, proof_segment: ProofSegment) -> str:
