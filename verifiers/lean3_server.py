@@ -188,17 +188,40 @@ be runnable as a Lean statement and is not in natural language.)
 """
         response = llm_access.complete(message_body)   
         response = self.standardize_comments_and_indentation(response)
-        # Get lines up to the first non-comment
         response_lines = response.splitlines()
-        response_lines_up_to_first_non_comment = []
-        for line in response_lines:
-            response_lines_up_to_first_non_comment.append(line)
+        non_empty_cutoff : int = None
+            # The index of the first non-comment line
+        compile_cutoff : int = None
+            # The max. line index up to which the code compiles
+        for idx, line in enumerate(response_lines):
             if line and not re.match(lean3_comment_or_blank_line_pattern, line):
+                non_empty_cutoff = idx
                 break
-        # TODO: instead of just getting one line as such,
-        # try to find as many lines as runnable.
+        if non_empty_cutoff is None:
+            raise ValueError("No tactic in LLM response.")
+                # We could just try prompting the LLM again,
+                # but more likely something is wrong with the LLM,
+                # with the prompt, or with parsing.
+        else:
+            # Count down to non_empty_cutoff + 1
+            # This boundary is desirable: if even including one nonempty line
+            # renders the code non-compilable, then the response is
+            # "totally wrong".
+            for idx in range(len(response_lines), non_empty_cutoff, -1):
+                test_proof = '\n'.join(response_lines[:idx])
+                test_result = self.verifier.verify(test_proof)
+                if not any(map(
+                    lambda m: m.severity == 'error',
+                    test_result.messages
+                )):
+                    compile_cutoff = idx
+                    break
+            if compile_cutoff is None:
+                # Does not compile at all. Just pass the full response
+                # and the search algorithm will know this attempts fails.
+                compile_cutoff = len(response_lines)
 
-        tactics = '\n'.join(response_lines_up_to_first_non_comment)
+        tactics = '\n'.join(response_lines[:compile_cutoff])
         imports = '\n'.join(re.findall(
             r'^.*(?<=--\[IMPORT\])(.*?)$',
             tactics,

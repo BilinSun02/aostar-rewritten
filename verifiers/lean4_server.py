@@ -186,7 +186,7 @@ class Lean4Server(VerifierLanguage):
                 
                 line = remainder
 
-            return '\n'.join(indented_tactics)
+        return '\n'.join(indented_tactics)
 
 
     def close_proof(self, proof_segment: ProofSegment) -> str:
@@ -228,14 +228,16 @@ be runnable as a Lean statement and is not in natural language.)
         if "·" in response:
             raise NotImplementedError("LLM response contains '·'. \
                                       We can't parse this yet.")
+                # Because it will be a bit involved to deal with the indentation
         response = self.standardize_comments_and_indentation(response)
-        # Get lines up to the first non-comment
         response_lines = response.splitlines()
         non_empty_cutoff : int = None
+            # The index of the first non-comment line
         compile_cutoff : int = None
+            # The max. line index up to which the code compiles
         for idx, line in enumerate(response_lines):
             if line and not re.match(lean4_comment_or_blank_line_pattern, line):
-                non_empty_cutoff = idx + 1
+                non_empty_cutoff = idx
                 break
         if non_empty_cutoff is None:
             raise ValueError("No tactic in LLM response.")
@@ -243,6 +245,10 @@ be runnable as a Lean statement and is not in natural language.)
                 # but more likely something is wrong with the LLM,
                 # with the prompt, or with parsing.
         else:
+            # Count down to non_empty_cutoff + 1
+            # This boundary is desirable: if even including one nonempty line
+            # renders the code non-compilable, then the response is
+            # "totally wrong".
             for idx in range(len(response_lines), non_empty_cutoff, -1):
                 test_proof = '\n'.join(response_lines[:idx])
                 test_result = self.verifier.verify(test_proof)
