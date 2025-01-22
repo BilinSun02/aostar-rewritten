@@ -3,35 +3,11 @@
 # !!!TODO: (1) move the model file to the aostar-rewritten dir
 # !!!TODO: (2) write README for setting up the env with ds support
 
-from .common import LLMAccess, CostCircuitBreak
-from vllm import LLM, SamplingParams
-from rpc import RPCServer, RPCClient
+from .common import LLMAccess
+from rpc import RPCClient
 import socket
 from contextlib import closing
-
-class DeepSeekProverRPCServer(RPCServer):
-    def __init__(self) -> None:
-        model_name = "../2dsmodel/DeepSeek-Prover-V1.5/deepseek-ai/DeepSeek-Prover-V1.5-RL" # !!TODO: move
-        self.model = LLM(
-            model = model_name,
-            max_num_batched_tokens = 8192,
-            seed = 1,
-            trust_remote_code = True
-        )
-        self.sampling_params = SamplingParams(
-            temperature = 1.0,
-            max_tokens = 2048,
-            top_p = 0.95,
-            n = 1,
-        )
-
-    def process(self, s: str) -> str:
-        model_outputs = self.model.generate(
-            prompt,
-            self.sampling_params,
-            use_tqdm = True,
-        )
-        return model_outputs[0].outputs[0].text
+import subprocess
 
 # Taken from https://stackoverflow.com/a/45690594
 def find_free_port():
@@ -46,14 +22,18 @@ class DeepSeekProverAccess(LLMAccess):
     def __init__(self) -> None:
         super().__init__("DeepSeekProverAccess")
         self.port = find_free_port()
-        self.rpc_server = DeepSeekProverRPCServer( # !!!!TODO: move to subprocess
-            host = 'localhost',
-            port = self.port
+        self.rpc_server_process = subprocess.Popen(
+            f"python -m llms.DeepSeek_Prover_server --port {self.port}",
+            shell = True
+            # Won't block because stdout=stderr=stdin=None
         )
         self.rpc_client = RPCClient(
             host = 'localhost',
             port = self.port
         )
+
+    def complete(self, prompt: str) -> str:
+        return self.rpc_client.process(prompt)
 
 if __name__ == "__main__":
     prompt = r'''/-- This is a complete Lean 4 proof written by an expert,
