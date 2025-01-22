@@ -250,6 +250,9 @@ be runnable as a Lean statement and is not in natural language.)
             # renders the code non-compilable, then the response is
             # "totally wrong".
             for idx in range(len(response_lines), non_empty_cutoff, -1):
+                if re.match(lean4_comment_or_blank_line_pattern,
+                            response_lines[idx-1]):
+                    continue # Nothing to check about a comment
                 test_proof = '\n'.join(response_lines[:idx])
                 test_result = self.verifier.verify(test_proof)
                 if not any(map(
