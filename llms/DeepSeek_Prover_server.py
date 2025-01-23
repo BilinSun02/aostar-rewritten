@@ -1,9 +1,10 @@
 from vllm import LLM, SamplingParams
-from .rpc import RPCServer, RPCMessage, RPCMessageKind
+from .rpc import RPCServer
 from typing import Any
 
 class DeepSeekProverRPCServer(RPCServer):
-    def __init__(self) -> None:
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         model_name = "../2dsmodel/DeepSeek-Prover-V1.5/deepseek-ai/DeepSeek-Prover-V1.5-RL" # !!TODO: move
         self.model = LLM(
             model = model_name,

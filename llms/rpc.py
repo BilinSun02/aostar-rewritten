@@ -15,7 +15,7 @@ class RPCMsgKind(Enum):
     MESSAGE = 2
     ERROR = 4
 
-type RPCMessage = tuple[RPCMsgKind, Any]
+RPCMessage = tuple[RPCMsgKind, Any]
 # Better defined as a dependent type:
 # Kinds of valid values:
 # (HANDSHAKE, bool):
