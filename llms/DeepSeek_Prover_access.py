@@ -3,11 +3,12 @@
 # !!!TODO: (1) move the model file to the aostar-rewritten dir
 # !!!TODO: (2) write README for setting up the env with ds support
 
-from .common import LLMAccess
-from rpc import RPCClient
 import socket
 from contextlib import closing
 import subprocess
+
+from .common import LLMAccess
+from .rpc import RPCClient
 
 # Taken from https://stackoverflow.com/a/45690594
 def find_free_port():

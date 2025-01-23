@@ -1,12 +1,30 @@
 # Adapted from
 # https://medium.com/@taraszhere/coding-remote-procedure-call-rpc-with-python-3b14a7d00ac8
+
 import json
 import socket
+from enum import Enum
 from abc import ABC, abstractmethod
 from threading import Thread
 from typing import Any
 
 SIZE = 1024
+
+class RPCMsgKind(Enum):
+    HANDSHAKE = 1
+    MESSAGE = 2
+    ERROR = 4
+
+type RPCMessage = tuple[RPCMsgKind, Any]
+# Better defined as a dependent type:
+# Kinds of valid values:
+# (HANDSHAKE, bool):
+# - (HANDSHAKE, True): Indicates readiness
+# - (HANDSHAKE, False): Indicates not-ready
+# (REQUEST, Any): Request from client to process the content
+# (ERROR, str): Error message
+
+handshake_message = (RPCMsgKind.HANDSHAKE, True)
 
 class RPCServer(ABC):
     # [[noreturn]]
@@ -28,12 +46,21 @@ class RPCServer(ABC):
         while True:
             try: s = json.loads(client.recv(SIZE).decode())
             except: break # Client disconnected.
-            try: response = self.process(s)
-            except Exception as e: pass
-                # Send back exeption if function called by client is not registred
-                # !!TODO: implement a handling system
-                #client.sendall(json.dumps(str(e)).encode())
-            else: client.sendall(json.dumps(response).encode())
+            try:
+                assert isinstance(s, RPCMessage)
+                match s[0]:
+                    case RPCMsgKind.HANDSHAKE:
+                        response = (RPCMsgKind.HANDSHAKE, bool(s[2]))
+                    case RPCMsgKind.REQUEST:
+                        response = (RPCMsgKind.MESSAGE, self.process(s))
+                    case RPCMsgKind.ERROR:
+                        response = (RPCMsgKind.ERROR, "Received error message")
+                    case _:
+                        response = (RPCMsgKind.ERROR, "Unknown message type")
+            except Exception as e:
+                response = (RPCMsgKind.ERROR, str(e))
+
+            client.sendall(json.dumps(response).encode())
 
         client.close()
 
@@ -55,5 +82,14 @@ class RPCClient:
         except: pass
 
     def process(self, s: Any):
+        while True:
+            try:
+                self.__sock.sendall(json.dumps(handshake_message).encode())
+                response = json.loads(self.__sock.recv(SIZE).decode())
+                if response[0] == RPCMsgKind.HANDSHAKE\
+                    and response[1]:
+                    break
+            except:
+                pass
         self.__sock.sendall(json.dumps(s).encode())
         return json.loads(self.__sock.recv(SIZE).decode())

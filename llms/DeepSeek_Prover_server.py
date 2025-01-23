@@ -1,5 +1,6 @@
 from vllm import LLM, SamplingParams
-from rpc import RPCServer
+from .rpc import RPCServer, RPCMessage, RPCMessageKind
+from typing import Any
 
 class DeepSeekProverRPCServer(RPCServer):
     def __init__(self) -> None:
@@ -22,10 +23,12 @@ class DeepSeekProverRPCServer(RPCServer):
             s,
             self.sampling_params,
             use_tqdm = True,
-        )
-        return model_outputs[0].outputs[0].text
+        )[0].outputs[0].text
+        return model_outputs
 
 if __name__ == "__main__":
+    # This is NOT a unit test. This file is intended to be run
+    # directly and serve as a server.
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str, default='localhost')
