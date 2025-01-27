@@ -24,9 +24,12 @@ class DeepSeekProverAccess(LLMAccess):
         super().__init__("DeepSeekProverAccess")
         self.port = find_free_port()
         self.rpc_server_process = subprocess.Popen(
-            f"python -m llms.DeepSeek_Prover_server --port {self.port}",
-            shell = True
-            # Won't block because stdout=stderr=stdin=None
+            f"python -m llms.DeepSeek_Prover_server --port {self.port} --host 'localhost'",
+            shell = True,
+            # Won't block because the following are set to None:
+            stdin = None,
+            stdout = None,
+            stderr = None,
         )
         self.rpc_client = RPCClient(
             host = 'localhost',
@@ -34,9 +37,10 @@ class DeepSeekProverAccess(LLMAccess):
         )
 
     def complete(self, prompt: str) -> str:
-        return self.rpc_client.process(prompt)
+        return self.rpc_client.query(prompt)
 
 if __name__ == "__main__":
+    # Unit test code
     prompt = r'''/-- This is a complete Lean 4 proof written by an expert,
 interspersed with thoughts kept as comments. --/
 import Mathlib
