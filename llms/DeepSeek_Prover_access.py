@@ -25,18 +25,18 @@ class DeepSeekProverAccess(LLMAccess):
         super().__init__("DeepSeekProverAccess")
         self.rpc_client = RPCClient(
             host = 'localhost',
-            port = self.port
+            port = DSPROVER_DEFAULT_PORT
         )
 
         try:
             # Test if there's an existing server running
             self.rpc_client.connect()
-            self.port = DSPROVER_DEFAULT_PORT
             self.rpc_client.disconnect()
             self.rpc_server_process = None
-            #print(f"Using existing at port {DSPROVER_DEFAULT_PORT}")
-        except:
-            #print("Running new instance")
+            print(f"Using existing at port {DSPROVER_DEFAULT_PORT}")
+        except Exception as e:
+            print(f"Failed to connect to existing instance: {e.__repr__()}")
+            print("Running new instance")
             self.port = _find_free_port()
             self.rpc_client.port = self.port
             self.rpc_server_process = subprocess.Popen(

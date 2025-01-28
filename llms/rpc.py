@@ -73,21 +73,16 @@ class RPCServer(ABC):
 class RPCClient:
     def __init__(self, host:str='localhost', port:int=None) -> None:
         self.__sock = None
-        self.__host = host
-        self.__port = port
-        self.__address = (host, port)
+        self.host = host
+        self.port = port
 
     @property
-    def port(self) -> int:
-        return self.__port
-    @port.setter
-    def port(self, value: int):
-        self.__port = value
-        self.__address = (self.__host, value)
+    def address(self):
+        return (self.host, self.port)
 
     def connect(self):
         self.__sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.__sock.connect(self.__address)
+        self.__sock.connect(self.address)
 
     def disconnect(self):
         try: self.__sock.close()
@@ -118,4 +113,4 @@ class RPCClient:
         self.__sock.sendall(json.dumps((RPCMsgKind.MESSAGE, s)).encode())
         ans = json.loads(self.__sock.recv(SIZE).decode())
         self.disconnect()
-        return ans
+        return ans[1]
