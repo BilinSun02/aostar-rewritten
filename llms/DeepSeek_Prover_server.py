@@ -2,6 +2,8 @@ from vllm import LLM, SamplingParams
 from .rpc import RPCServer
 from typing import Any
 
+DSPROVER_DEFAULT_PORT = 6626 # Screw "WAGO Service and Update"
+
 class DeepSeekProverRPCServer(RPCServer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -33,6 +35,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str, default='localhost')
-    parser.add_argument('--port', type=int, default=None)
+    parser.add_argument('--port', type=int, default=DSPROVER_DEFAULT_PORT)
     args = parser.parse_args()
     DeepSeekProverRPCServer(host = args.host, port = args.port).run()

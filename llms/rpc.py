@@ -73,7 +73,17 @@ class RPCServer(ABC):
 class RPCClient:
     def __init__(self, host:str='localhost', port:int=None) -> None:
         self.__sock = None
+        self.__host = host
+        self.__port = port
         self.__address = (host, port)
+
+    @property
+    def port(self) -> int:
+        return self.__port
+    @port.setter
+    def port(self, value: int):
+        self.__port = value
+        self.__address = (self.__host, value)
 
     def connect(self):
         self.__sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

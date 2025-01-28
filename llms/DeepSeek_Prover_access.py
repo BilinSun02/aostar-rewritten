@@ -9,9 +9,10 @@ import subprocess
 
 from .common import LLMAccess
 from .rpc import RPCClient
+from .DeepSeek_Prover_server import DSPROVER_DEFAULT_PORT
 
 # Taken from https://stackoverflow.com/a/45690594
-def find_free_port():
+def _find_free_port():
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(('', 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -22,19 +23,30 @@ class DeepSeekProverAccess(LLMAccess):
 
     def __init__(self) -> None:
         super().__init__("DeepSeekProverAccess")
-        self.port = find_free_port()
-        self.rpc_server_process = subprocess.Popen(
-            f"python -m llms.DeepSeek_Prover_server --port {self.port} --host 'localhost'",
-            shell = True,
-            # Won't block because the following are set to None:
-            stdin = None,
-            stdout = None,
-            stderr = None,
-        )
         self.rpc_client = RPCClient(
             host = 'localhost',
             port = self.port
         )
+
+        try:
+            # Test if there's an existing server running
+            self.rpc_client.connect()
+            self.port = DSPROVER_DEFAULT_PORT
+            self.rpc_client.disconnect()
+            self.rpc_server_process = None
+            #print(f"Using existing at port {DSPROVER_DEFAULT_PORT}")
+        except:
+            #print("Running new instance")
+            self.port = _find_free_port()
+            self.rpc_client.port = self.port
+            self.rpc_server_process = subprocess.Popen(
+                f"python -m llms.DeepSeek_Prover_server --port {self.port} --host 'localhost'",
+                shell = True,
+                # Won't block because the following are set to None:
+                stdin = None,
+                stdout = None,
+                stderr = None,
+            )
 
     def complete(self, prompt: str) -> str:
         return self.rpc_client.query(prompt)
