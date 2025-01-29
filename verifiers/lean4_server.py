@@ -240,7 +240,7 @@ be runnable as a Lean statement and is not in natural language.)
                 non_empty_cutoff = idx
                 break
         if non_empty_cutoff is None:
-            raise ValueError("No tactic in LLM response.")
+            raise ValueError(f"No tactic in LLM {response=}")
                 # We could just try prompting the LLM again,
                 # but more likely something is wrong with the LLM,
                 # with the prompt, or with parsing.

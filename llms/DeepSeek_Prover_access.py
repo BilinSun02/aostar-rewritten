@@ -9,7 +9,8 @@ import subprocess
 
 from .common import LLMAccess
 from .rpc import RPCClient
-from .DeepSeek_Prover_server import DSPROVER_DEFAULT_PORT
+
+DSPROVER_DEFAULT_PORT = 6626 # Screw "WAGO Service and Update"
 
 # Taken from https://stackoverflow.com/a/45690594
 def _find_free_port():
@@ -33,14 +34,15 @@ class DeepSeekProverAccess(LLMAccess):
             self.rpc_client.connect()
             self.rpc_client.disconnect()
             self.rpc_server_process = None
-            print(f"Using existing at port {DSPROVER_DEFAULT_PORT}")
+            #print(f"Using existing at port {DSPROVER_DEFAULT_PORT}")
         except Exception as e:
-            print(f"Failed to connect to existing instance: {e.__repr__()}")
-            print("Running new instance")
+            #print(f"Failed to connect to existing instance: {e.__repr__()}")
+            #print("Running new instance")
             self.port = _find_free_port()
             self.rpc_client.port = self.port
             self.rpc_server_process = subprocess.Popen(
-                f"python -m llms.DeepSeek_Prover_server --port {self.port} --host 'localhost'",
+                f"python -m llms.DeepSeek_Prover_server "+\
+                    f"--port {self.port} --host 'localhost'",
                 shell = True,
                 # Won't block because the following are set to None:
                 stdin = None,
@@ -52,7 +54,7 @@ class DeepSeekProverAccess(LLMAccess):
         return self.rpc_client.query(prompt)
 
 if __name__ == "__main__":
-    # Unit test code
+    # Test driving code
     prompt = r'''/-- This is a complete Lean 4 proof written by an expert,
 interspersed with thoughts kept as comments. --/
 import Mathlib

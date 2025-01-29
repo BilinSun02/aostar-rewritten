@@ -1,8 +1,10 @@
+# This file is intended to be run directly and serve as a server.
+# It does NOT contain test-driving code.
+# This file should also NOT be imported from. Importing this file
+# disrupts all logging functionality, apparently a problem of vllm.
 from vllm import LLM, SamplingParams
 from .rpc import RPCServer
 from typing import Any
-
-DSPROVER_DEFAULT_PORT = 6626 # Screw "WAGO Service and Update"
 
 class DeepSeekProverRPCServer(RPCServer):
     def __init__(self, *args, **kwargs) -> None:
@@ -30,11 +32,11 @@ class DeepSeekProverRPCServer(RPCServer):
         return model_outputs
 
 if __name__ == "__main__":
-    # This is NOT a unit test. This file is intended to be run
+    # This is NOT test driving code. This file is intended to be run
     # directly and serve as a server.
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str, default='localhost')
-    parser.add_argument('--port', type=int, default=DSPROVER_DEFAULT_PORT)
+    parser.add_argument('--port', type=int, default=0)
     args = parser.parse_args()
     DeepSeekProverRPCServer(host = args.host, port = args.port).run()

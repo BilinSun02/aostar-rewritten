@@ -22,6 +22,7 @@ if __name__ == "__main__":
     import logging
     logger = logging.getLogger(__name__)
     logging.basicConfig(filename=log_path, encoding='utf-8', level=logging.DEBUG, filemode="w")
+    logger.info("Running algorithm.py unit tests.")
 
     if args.load_checkpoint_path:
         load_checkpoint_path: Final[str] = os.path.abspath(args.load_checkpoint_path)
@@ -433,6 +434,7 @@ if __name__ == "__main__":
     # Test driving code
     test_language : Literal["Lean 3", "Lean 4"] = "Lean 3"
     test_model : Literal["DeepSeek-Prover", "gpt-4o-mini"] = "DeepSeek-Prover"
+    #test_model : Literal["DeepSeek-Prover", "gpt-4o-mini"] = "gpt-4o-mini"
     test_difficulty : Literal["easy", "hard"] = "easy"
 
     match test_language:
