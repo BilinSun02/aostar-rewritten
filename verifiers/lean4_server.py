@@ -199,7 +199,8 @@ class Lean4Server(VerifierLanguage):
         comment: str,
         llm_access: LLMAccess
     ) -> str:
-        message_body = f"""
+        if llm_access.follows_instructions:
+            message_body = f"""
 /-
 The following, up to "--[EOF]", was an incomplete Lean 4 proof.
 An expert picked up from there and completed the proof.
@@ -224,6 +225,8 @@ be runnable as a Lean statement and is not in natural language.)
 -/
 --[EOF]
 """
+        else: # The model wouldn't quite understand our comments anyway
+            message_body = proof_segment.imports + '\n' + proof_segment.tactics
         response = llm_access.complete(message_body)   
         if "·" in response:
             raise NotImplementedError("LLM response contains '·'. \

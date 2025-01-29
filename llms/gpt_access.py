@@ -73,6 +73,7 @@ messages_skeleton = [
 
 class GptAccess(LLMAccess):
     incurs_cost: bool = True
+    follows_instructions: bool = True
 
     def __init__(self, 
         model_name: str,

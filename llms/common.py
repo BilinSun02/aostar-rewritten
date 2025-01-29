@@ -5,6 +5,11 @@ class CostCircuitBreak(Exception):
 
 class LLMAccess(ABC):
     incurs_cost: bool
+    follows_instructions: bool
+        # False if, like DeepSeek, the model naively completes text, rather 
+        # than understanding and following instructions.
+        # If False, we need to careful not to e.g. ask the model to produce 
+        # code in specific formats, since the model will ignore the request.
 
     def __init__(self, 
         model_name: str,

@@ -21,6 +21,7 @@ def _find_free_port():
 
 class DeepSeekProverAccess(LLMAccess):
     incurs_cost: bool = False
+    follows_instructions: bool = True
 
     def __init__(self) -> None:
         super().__init__("DeepSeekProverAccess")
