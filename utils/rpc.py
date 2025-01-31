@@ -126,6 +126,11 @@ class RPCClient:
                 warnings.warn(f"Pinging failed: {e.__repr__()}")
             sleep(1)
         self.__sock.sendall(json.dumps((RPCMsgKind.MESSAGE, s)).encode())
-        ans = json.loads(self.__sock.recv(SIZE).decode())
+        while True:
+            try:
+                ans = json.loads(self.__sock.recv(SIZE).decode())
+                break
+            except:
+                pass
         self.disconnect()
         return ans[1]
