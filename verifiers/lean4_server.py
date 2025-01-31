@@ -232,18 +232,20 @@ class Lean4Server(VerifierLanguage):
             # This boundary is desirable: if even including one nonempty line
             # renders the code non-compilable, then the response is
             # "totally wrong".
+            test_proofs = []
             for idx in range(len(response_lines), non_empty_cutoff, -1):
-                if re.match(lean4_comment_or_blank_line_pattern,
-                            response_lines[idx-1]):
-                    continue # Nothing to check about a comment
-                test_proof = '\n'.join(response_lines[:idx])
-                test_result = self.verifier().verify(test_proof)
-                if not any(map(
-                    lambda m: m.severity == 'error',
-                    test_result.messages
-                )):
-                    compile_cutoff = idx
+                if not re.match(lean4_comment_or_blank_line_pattern, response_lines[idx-1]):
+                    # Nothing to check about a comment
+                    test_proofs.append('\n'.join(response_lines[:idx]))
+
+            with mp.Pool() as pool:
+                test_results = pool.map(self.verifier().verify, test_proofs)
+
+            for idx, result in enumerate(test_results):
+                if not any(map(lambda m: m.severity == 'error', result.messages)):
+                    compile_cutoff = len(response_lines) - idx
                     break
+
             if compile_cutoff is None:
                 # Does not compile at all. Just pass the full response
                 # and the search algorithm will know this attempts fails.
