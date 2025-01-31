@@ -10,9 +10,11 @@ from omegaconf import DictConfig, OmegaConf
 from lean3_cmd_executor_aostar import run_proof_on_lean
 from custom_logger import create_logger
 from algorithm import ao_star, NodeState
+from data_structures import Node, NodeState, ANDNode, MERISTEMNode, ORNode
 from data_structures import *
-# !!!! TODO: change GPTPrompter to VerifierLanguage
-from prompt_gpt import GPTPrompter
+from verifiers.language import VerifierLanguage
+from verifiers.verifier import Verifier
+from llms.common import LLMAccess
 
 
 # !!TODO: pass around the Verifier instance
@@ -27,7 +29,9 @@ class AOStarSolver(ABC):
     """
 
     theorem_statement: str
-    prompter: GPTPrompter
+    language: VerifierLanguage
+    llm_access: LLMAccess
+    verifier: Verifier
     logger: logging.Logger
     load_checkpoint_path: Optional[str]
     dump_checkpoint_path: Optional[str]
@@ -47,7 +51,8 @@ class AOStarSolver(ABC):
         return ao_star(
             self.theorem_statement,
             self.estimate,
-            self.prompter,
+            self.language,
+            self.verifier,
             self.logger,
             self.load_checkpoint_path,
             self.dump_checkpoint_path,
@@ -204,9 +209,9 @@ class AOStarExponentialZigzagSolver(AOStarZigzagSolver):
 class AOStarBatchSolver(ABC):
     max_threads: int
     solver_type: Type[AOStarSolver]
-    use_dir: Optional[str] # Use (or reuse) a directory
-    think_aloud: bool
-    model_name: str
+    use_dir: Optional[str] # Use (or reuse) a directory for logging
+    think_aloud: bool # !!TODO: pass this to the language servers
+    llm_access: LLMAccess
     budget_per_problem: int
     identifier_str: str = field(
         default_factory =
@@ -248,9 +253,6 @@ class AOStarBatchSolver(ABC):
         pass
 
     def solve_all(self) -> None:
-        total_token_count = 0
-        total_cost = 0 # In cents
-
         def solve_theorem(idx, thm_statement, thm_group, thm_name):
             one_based_idx = idx + 1
             thm_identifier = str(one_based_idx) + " " \
