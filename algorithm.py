@@ -342,7 +342,7 @@ def ao_star(
     proof_str = ""
     match root.state:
         case NodeState.SOLVED:
-            proof_str = collect_solution(root)
+            proof_str = collect_solution(root, language.proof_segment_type.empty_proof(), language)
             logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search successful:\n' + proof_str)
         case NodeState.FAILED:
             logger.info(f'{datetime.datetime.now().strftime("%Y %b-%d %H:%M:%S")}: Proof search unsuccessful.')
