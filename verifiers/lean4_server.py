@@ -202,8 +202,29 @@ class Lean4Server(VerifierLanguage):
     ) -> str:
         if llm_access.follows_instructions:
             message_body = f"""
+/-
+The following, up to "--[EOF]", was an incomplete Lean 4 proof.
+An expert picked up from there and completed the proof.
+The expert first planned out the proof, and kept thoughts
+as comments of the form
+"--[THOUGHTS]..."
+before writing up any actual tactics.
+The expert was unable to add anything to the beginning
+of the document, in particular any `import` statements.
+To make up for this, the expert would added a comment of
+the following form, if necessary, before the line that
+depends on the import:
+"--[IMPORT]import xxx"
+so that the reader can add the `import`s to the beginning
+to get a runnable proof. (Note that `import xxx` should
+be runnable as a Lean statement and is not in natural language.)
+-/
 {proof_segment.imports}
 {proof_segment.tactics}
+/-
+{comment}
+-/
+--[EOF]
 """
         else: # The model wouldn't quite understand our comments anyway
             message_body = proof_segment.imports + '\n' + proof_segment.tactics
