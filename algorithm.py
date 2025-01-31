@@ -517,7 +517,7 @@ theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
     match test_model:
         case "DeepSeek-Prover":
             from llms.DeepSeek_Prover_access import DeepSeekProverAccess
-            llm_access = DeepSeekProverAccess(host='g20')
+            llm_access = DeepSeekProverAccess(host='')
         case "gpt-4o-mini":
             from llms.gpt_access import GptAccess
             llm_access = GptAccess("gpt-4o-mini")

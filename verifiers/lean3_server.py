@@ -207,6 +207,10 @@ be runnable as a Lean statement and is not in natural language.)
                 # with the prompt, or with parsing.
         else:
             test_proofs = []
+            # Count down to non_empty_cutoff + 1 (inclusive)
+            # This boundary is desirable: if even including one nonempty line
+            # renders the code non-compilable, then the response is
+            # "totally wrong".
             for idx in range(len(response_lines), non_empty_cutoff, -1):
                 if not re.match(lean3_comment_or_blank_line_pattern, response_lines[idx-1]):
                     # Nothing to check about a comment
@@ -215,17 +219,18 @@ be runnable as a Lean statement and is not in natural language.)
             with mp.Pool() as pool:
                 test_results = pool.map(self.verifier().verify, test_proofs)
 
+            accepted_proof : str = None
             for idx, result in enumerate(test_results):
                 if not any(map(lambda m: m.severity == 'error', result.messages)):
-                    compile_cutoff = len(response_lines) - idx
+                    accepted_proof = test_proofs[idx]
                     break
 
-            if compile_cutoff is None:
+            if accepted_proof is None:
                 # Does not compile at all. Just pass the full response
                 # and the search algorithm will know this attempts fails.
-                compile_cutoff = len(response_lines)
+                accepted_proof = response
 
-        tactics = '\n'.join(response_lines[:compile_cutoff])
+        tactics = accepted_proof
         imports = '\n'.join(re.findall(
             r'^.*(?<=--\[IMPORT\])(.*?)$',
             tactics,
