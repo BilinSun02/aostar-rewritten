@@ -6,9 +6,10 @@
 import socket
 from contextlib import closing
 import subprocess
+import warnings
 
 from .common import LLMAccess
-from .rpc import RPCClient
+from utils.rpc import RPCClient
 
 DSPROVER_DEFAULT_PORT = 6626 # Screw "WAGO Service and Update"
 
@@ -23,24 +24,30 @@ class DeepSeekProverAccess(LLMAccess):
     incurs_cost: bool = False
     follows_instructions: bool = True
 
-    def __init__(self) -> None:
+    def __init__(self,
+        host = 'localhost',
+        port = DSPROVER_DEFAULT_PORT,
+    ) -> None:
         super().__init__("DeepSeekProverAccess")
-        self.rpc_client = RPCClient(
-            host = 'localhost',
-            port = DSPROVER_DEFAULT_PORT
-        )
 
         try:
             # Test if there's an existing server running
+            self.host = host
+            self.port = port
+            self.rpc_client = RPCClient(
+                host = self.host,
+                port = self.port
+            )
             self.rpc_client.connect()
             self.rpc_client.disconnect()
             self.rpc_server_process = None
             #print(f"Using existing at port {DSPROVER_DEFAULT_PORT}")
         except Exception as e:
-            #print(f"Failed to connect to existing instance: {e.__repr__()}")
-            #print("Running new instance")
+            warnings.warn(f"Failed to connect to instance at specified " +\
+                f"address {host}:{port}; reason: {e.__repr__()}\n" +\
+                "Running new instance.")
+            self.host = host
             self.port = _find_free_port()
-            self.rpc_client.port = self.port
             self.rpc_server_process = subprocess.Popen(
                 f"python -m llms.DeepSeek_Prover_server "+\
                     f"--port {self.port} --host 'localhost'",
@@ -49,6 +56,10 @@ class DeepSeekProverAccess(LLMAccess):
                 stdin = None,
                 stdout = None,
                 stderr = None,
+            )
+            self.rpc_client = RPCClient(
+                host = self.host,
+                port = self.port
             )
 
     def complete(self, prompt: str) -> str:

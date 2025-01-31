@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Type
+import multiprocessing as mp
 
 from .language import *
 from .verifier import Verifier
@@ -50,7 +51,7 @@ class Lean3ProofSegment(ProofSegment):
 class Lean3Server(VerifierLanguage):
     language_name: str = "Lean 3"
     proof_segment_type: Type[ProofSegment] = Lean3ProofSegment
-    verifier: Verifier = Lean3Verifier()
+    verifier: Type[Verifier] = Lean3Verifier
 
     @staticmethod
     def standardize_comments_and_indentation(tactics_str: str) -> str:
@@ -102,9 +103,8 @@ class Lean3Server(VerifierLanguage):
         # Now normalize the indentation
         indented_tactics = []
         indent_level = 0
-        indent_space = ' '  # Single space works for Lean 4
+        indent_space = ' '  # Necessary for Lean 4, optional for Lean 3
 
-        # Split the source code into lines
         lines = tactics_str.splitlines()
 
         for line in lines:
@@ -215,7 +215,7 @@ be runnable as a Lean statement and is not in natural language.)
                             response_lines[idx-1]):
                     continue # Nothing to check about a comment
                 test_proof = '\n'.join(response_lines[:idx])
-                test_result = self.verifier.verify(test_proof)
+                test_result = self.verifier().verify(test_proof)
                 if not any(map(
                     lambda m: m.severity == 'error',
                     test_result.messages

@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Type
+import multiprocessing as mp
 
 from .language import *
 from .verifier import Verifier
@@ -73,7 +74,7 @@ class Lean4ProofSegment(ProofSegment):
 class Lean4Server(VerifierLanguage):
     language_name: str = "Lean 4"
     proof_segment_type: Type[ProofSegment] = Lean4ProofSegment
-    verifier: Verifier = Lean4Verifier()
+    verifier: Type[Verifier] = Lean4Verifier
 
     # Not currently used
     #@staticmethod
@@ -147,7 +148,7 @@ class Lean4Server(VerifierLanguage):
         # Now normalize the indentation
         indented_tactics = []
         indent_level = 0
-        indent_space = ' '  # Single space works for Lean 4
+        indent_space = ' '  # Necessary for Lean 4, optional for Lean 3
 
         lines = tactics_str.splitlines()
 
@@ -201,29 +202,8 @@ class Lean4Server(VerifierLanguage):
     ) -> str:
         if llm_access.follows_instructions:
             message_body = f"""
-/-
-The following, up to "--[EOF]", was an incomplete Lean 4 proof.
-An expert picked up from there and completed the proof.
-The expert first planned out the proof, and kept thoughts
-as comments of the form
-"--[THOUGHTS]..."
-before writing up any actual tactics.
-The expert was unable to add anything to the beginning
-of the document, in particular any `import` statements.
-To make up for this, the expert would added a comment of
-the following form, if necessary, before the line that
-depends on the import:
-"--[IMPORT]import xxx"
-so that the reader can add the `import`s to the beginning
-to get a runnable proof. (Note that `import xxx` should
-be runnable as a Lean statement and is not in natural language.)
--/
 {proof_segment.imports}
 {proof_segment.tactics}
-/-
-{comment}
--/
---[EOF]
 """
         else: # The model wouldn't quite understand our comments anyway
             message_body = proof_segment.imports + '\n' + proof_segment.tactics
@@ -257,7 +237,7 @@ be runnable as a Lean statement and is not in natural language.)
                             response_lines[idx-1]):
                     continue # Nothing to check about a comment
                 test_proof = '\n'.join(response_lines[:idx])
-                test_result = self.verifier.verify(test_proof)
+                test_result = self.verifier().verify(test_proof)
                 if not any(map(
                     lambda m: m.severity == 'error',
                     test_result.messages

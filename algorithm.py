@@ -432,7 +432,7 @@ def collect_solution(
 
 if __name__ == "__main__":
     # Test driving code
-    test_language : Literal["Lean 3", "Lean 4"] = "Lean 3"
+    test_language : Literal["Lean 3", "Lean 4"] = "Lean 4"
     test_model : Literal["DeepSeek-Prover", "gpt-4o-mini"] = "DeepSeek-Prover"
     #test_model : Literal["DeepSeek-Prover", "gpt-4o-mini"] = "gpt-4o-mini"
     test_difficulty : Literal["easy", "hard"] = "easy"
@@ -517,7 +517,7 @@ theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
     match test_model:
         case "DeepSeek-Prover":
             from llms.DeepSeek_Prover_access import DeepSeekProverAccess
-            llm_access = DeepSeekProverAccess()
+            llm_access = DeepSeekProverAccess(host='g20')
         case "gpt-4o-mini":
             from llms.gpt_access import GptAccess
             llm_access = GptAccess("gpt-4o-mini")
