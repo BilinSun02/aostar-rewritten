@@ -22,7 +22,7 @@ def _find_free_port():
 
 class DeepSeekProverAccess(LLMAccess):
     incurs_cost: bool = False
-    follows_instructions: bool = True
+    follows_instructions: bool = False
 
     def __init__(self,
         host = 'localhost',
@@ -63,7 +63,20 @@ class DeepSeekProverAccess(LLMAccess):
             )
 
     def complete(self, prompt: str) -> str:
-        return self.rpc_client.query(prompt)
+        # DeepSeek-Prover was always feeded this prompt head during
+        # training. (This hard-codes Lean 4, but DeepSeek-Prover is
+        # only trained on Lean 4 anyway.
+        prompt = """Complete the following Lean 4 code:
+
+```lean4
+""" + prompt
+        response = self.rpc_client.query(prompt)
+        response_lines = response.splitlines()
+        response_sans_closing_grave = ""
+        for line in response_lines:
+            if not line.strip() == "```":
+                response_sans_closing_grave += line + '\n'
+        return response_sans_closing_grave
 
 if __name__ == "__main__":
     # Test driving code

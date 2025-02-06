@@ -90,8 +90,7 @@ class Lean4Verifier(Verifier):
             #    "system_errors": traceback.format_exc(),
             #    "system_messages": system_messages
             #}
-            pass
-            # In our codebase, we don't handle this.
+            raise RuntimeError #TODO: inspect this later
         #result['verify_time'] = time.time() - start_time
         return result
 

@@ -433,9 +433,9 @@ def collect_solution(
 if __name__ == "__main__":
     # Test driving code
     test_language : Literal["Lean 3", "Lean 4"] = "Lean 4"
-    test_model : Literal["DeepSeek-Prover", "gpt-4o-mini"] = "DeepSeek-Prover"
-    #test_model : Literal["DeepSeek-Prover", "gpt-4o-mini"] = "gpt-4o-mini"
-    test_difficulty : Literal["easy", "hard"] = "easy"
+    #test_model : Literal["DeepSeek-Prover", "gpt-4o-mini"] = "DeepSeek-Prover"
+    test_model : Literal["DeepSeek-Prover", "gpt-4o-mini"] = "gpt-4o-mini"
+    test_difficulty : Literal["easy", "hard"] = "hard"
 
     match test_language:
         case "Lean 3":
@@ -459,16 +459,16 @@ begin
             from verifiers.lean4_server import Lean4Server as TestServer
             match test_difficulty:
                 case "easy":
-                    theorem_statement = """theorem a_plus_b_b_plus_a (a b : Nat) : a + b = b + a := by
-    skip
+                    theorem_statement = """theorem a_plus_b_b_plus_a (a b : Nat) : a + b = b + a :=
+by
 """
                 case "hard":
                     theorem_statement = """
 import Mathlib.Data.Nat.Prime
 import Mathlib.Tactic
 open Nat
-theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p := by
-    skip
+theorem infinitude_of_primes: ∀ N : ℕ, ∃ p ≥ N, Nat.Prime p :=
+by
 """
 
     # The following define "fixed-width BFS":

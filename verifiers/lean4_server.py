@@ -6,22 +6,18 @@ import multiprocessing as mp
 from .language import *
 from .verifier import Verifier
 from .lean4_verifier import Lean4Verifier
+from .verifier import VerificationResult
 from llms.prompts import *
 from llms.common import LLMAccess
 from .string_operations import replace_at_indices
 
 lean4_comment_or_blank_line_pattern = r'^\s*(--.*)?$'
 
-# The required Lean 4 theorem statement "initial segment" format:
-# Following `theorem ... := by`, there must be the line ` skip`.
-# This no-op serves two purposes: (1) the theorem statement needs
-# it to compile successfully on the Lean 4 repl; (2) It sets the
-# indentation (to be one space).
 @dataclass(frozen=True)
 class Lean4ProofSegment(ProofSegment):
     tactics: str
     imports: str = ""
-    # Had to sidestep the `import` keyword of Python ;-)
+    # They are ALWAYS assumed to either be empty or end with '\n'
 
     @classmethod
     def empty_proof(cls) -> 'Lean4ProofSegment':
@@ -48,22 +44,13 @@ class Lean4ProofSegment(ProofSegment):
 
     def __add__(self, other: 'Lean4ProofSegment') -> 'Lean4ProofSegment':
         assert isinstance(other, Lean4ProofSegment)
-
-        if self.imports and not self.imports.endswith('\n'):
-            imports = self.imports + '\n' + other.imports
-        else:
-            imports = self.imports + other.imports
-
-        other_tactics_str = self.normalize_indentation(other.tactics)
-        if self.tactics and not self.tactics.endswith('\n'):
-            tactics = self.tactics + '\n' + other_tactics_str
-        else:
-            tactics = self.tactics + other_tactics_str
-
-        return Lean4ProofSegment(tactics, imports)
+        return Lean4ProofSegment(
+                self.tactics + other.tactics,
+                self.imports + other.imports
+        )
 
     def __str__(self) -> str:
-        return self.imports + '\n' + self.tactics
+        return self.imports + self.tactics
 
     @property
     def indicates_abandonment(self) -> bool:
@@ -76,123 +63,16 @@ class Lean4Server(VerifierLanguage):
     proof_segment_type: Type[ProofSegment] = Lean4ProofSegment
     verifier: Type[Verifier] = Lean4Verifier
 
-    # Not currently used
-    #@staticmethod
-    #def get_last_indentation(multiline_string):
-    #    # Get the last non-empty line
-    #    lines = [line for line in multiline_string.splitlines() if line.strip()]
-    #    last_line = lines[-1] if lines else ""
-    #    indentation_string = last_line[:len(last_line) - len(last_line.lstrip())]
-    #    return indentation_string
-
-    @staticmethod
-    def first_line_indentation(tactics_str: str) -> str:
-        # Find the first non-empty, non-comment line of self.tactics
-        for line in tactics_str.splitlines():
-            if not re.match(
-                lean4_comment_or_blank_line_pattern,
-                line,
-                re.MULTILINE
-            ):
-                return re.match(r"^\s*", line).group(0)
-
-        return ""
-
-    @staticmethod
-    def standardize_comments_and_indentation(tactics_str: str) -> str:
-        """
-        Convert comments into the `--` format,
-        and remove all indentation before `--` or actual tactics.
-        (Spaces will need to be added back later to assemble into a proof.)
-        """
-
-        # First work on the `/- ... -/` comments, which have strange behaviros:
-        # Unlike the "greedy" manner of C where `/* /* */` is considered closed,
-        # Lean 3 and 4 do not consider `/- /- -/` closed, until it's completed
-        # to `/- /- -/ -/`.
-        block_comment_level = 0
-        idx = 1
-        replacements : List[Tuple[Tuple[int, int], str]] = []
-        while idx < len(tactics_str):
-            if tactics_str[idx-1:idx+1] == "/-":
-                block_comment_level += 1
-                replacements.append(((idx-1, idx+1), "--"))
-                idx += 2
-            elif tactics_str[idx-1:idx+1] == "-/":
-                #assert block_comment_level > 0
-                    # Maybe not part of a comment?
-                if block_comment_level == 1:
-                    # Closing block. A tactic may ensue on the same line.
-                    # We just break the possible tactic onto its own line
-                    # to avoid dealing with the weird indentation system of
-                    # Lean, which counts "-/" towards indentation.
-                    block_comment_level -= 1
-                    replacements.append(((idx-1, idx+1), "\n"))
-                elif block_comment_level > 1:
-                    block_comment_level -= 1
-                    replacements.append(((idx-1, idx+1), ""))
-                idx += 2
-            elif block_comment_level == 0 and tactics_str[idx-1:idx+1] == "--":
-                # Any subsequent `/-` in this line should be ignored
-                while idx < len(tactics_str) and tactics_str[idx] != '\n':
-                    idx += 1
-            elif block_comment_level > 0 and tactics_str[idx-1] == '\n':
-                replacements.append(((idx, idx), "--"))
-                idx += 1
-            else:
-                idx += 1
-
-        assert block_comment_level == 0, "Block comments not closed"
-        tactics_str = replace_at_indices(tactics_str, replacements)
-
-        # Now normalize the indentation
-        indented_tactics = []
-        indent_level = 0
-        indent_space = ' '  # Necessary for Lean 4, optional for Lean 3
-
-        lines = tactics_str.splitlines()
-
-        for line in lines:
-            if re.match(lean4_comment_or_blank_line_pattern, line):
-                indented_tactics.append(line)
-                continue
-
-            while line:
-                # If a line has braces in it,
-                # we chop it up into multiple lines so that each brace occupies
-                # a whole line while anything in between braces inhabit their own
-                # lines separate from the lines of the braces.
-                split_regex = r'^(\{|\}|[^\{\}]*)(.*)$'
-                split_line, remainder = re.match(split_regex, line).groups()
-                split_line = split_line.strip()
-                remainder = remainder.strip()
-
-                if split_line:
-                    if split_line == '{'\
-                        or (split_line.startswith('|') and "=>" in split_line):
-                        # The latter happens when it's part of casework
-                        indented_tactics.append(
-                            indent_space * indent_level + split_line
-                        )
-                        indent_level += 1
-                    elif split_line == '}':
-                        indent_level -= 1
-                        indented_tactics.append(
-                            indent_space * indent_level + split_line
-                        )
-                    elif split_line:  # Non-empty part (not a brace)
-                        indented_tactics.append(
-                            indent_space * indent_level + split_line
-                        )
-                
-                line = remainder
-
-        return '\n'.join(indented_tactics)
-
-
     def close_proof(self, proof_segment: ProofSegment) -> str:
-        proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
-        return proof_str
+        indt = proof_segment.last_line_indentation
+        if not indt:
+            indt = ' '
+        # Lean 4 refuses to compile empty `by` statements, i.e. one
+        # without any tactic in it. And when the statement is not
+        # empty, an extra `skip` no-op doesn't break anything.
+        return proof_segment.imports + '\n' +\
+               proof_segment.tactics + '\n' +\
+               indt + 'skip'
 
     def predict_proof_step(
         self,
@@ -203,21 +83,23 @@ class Lean4Server(VerifierLanguage):
         if llm_access.follows_instructions:
             message_body = f"""
 /-
-The following, up to "--[EOF]", was an incomplete Lean 4 proof.
-An expert picked up from there and completed the proof.
-The expert first planned out the proof, and kept thoughts
-as comments of the form
-"--[THOUGHTS]..."
-before writing up any actual tactics.
-The expert was unable to add anything to the beginning
-of the document, in particular any `import` statements.
-To make up for this, the expert would added a comment of
-the following form, if necessary, before the line that
-depends on the import:
-"--[IMPORT]import xxx"
-so that the reader can add the `import`s to the beginning
-to get a runnable proof. (Note that `import xxx` should
-be runnable as a Lean statement and is not in natural language.)
+The following, up to "--[EOF]", is an incomplete Lean 4 proof.
+Pick up from there and completed the proof. First plan out the
+proof, and keep thoughts as comments of the form "--[THOUGHTS]..."
+before writing up any actual tactics. As you are unable to add
+anything to the beginning of the document, in particular, any
+`import` statements, add a comment of the following form, if
+necessary, before the line that depends on the import, e.g.
+"--[IMPORT]import Mathlib.Data.Nat.Prime"
+and a post-processing program will add the `import`s for you.
+
+Otherwise, your response will be simply concatenated with the
+given proof segment and run on Lean. In particular,
+(1) No natural language or otherwise extraneous text may appear
+in comments. Your [IMPORT] statement should also not be written
+using natural language.
+(2) You are responsible for providing appropriate indentation.
+You may need nonzero indentation starting from the first line.
 -/
 {proof_segment.imports}
 {proof_segment.tactics}
@@ -227,13 +109,17 @@ be runnable as a Lean statement and is not in natural language.)
 --[EOF]
 """
         else: # The model wouldn't quite understand our comments anyway
-            message_body = proof_segment.imports + '\n' + proof_segment.tactics
+            message_body = str(proof_segment)
         response = llm_access.complete(message_body)   
-        if "·" in response:
-            raise NotImplementedError("LLM response contains '·'. \
-                                      We can't parse this yet.")
-                # Because it will be a bit involved to deal with the indentation
-        response = self.standardize_comments_and_indentation(response)
+
+        imports = '\n'.join(re.findall(
+            r'^.*(?<=--\[IMPORT\])(.*?)$',
+            response,
+            re.MULTILINE
+        ))
+        if imports and not imports.endswith('\n'):
+            imports += '\n'
+
         response_lines = response.splitlines()
         non_empty_cutoff : int = None
             # The index of the first non-comment line
@@ -248,37 +134,36 @@ be runnable as a Lean statement and is not in natural language.)
                 # We could just try prompting the LLM again,
                 # but more likely something is wrong with the LLM,
                 # with the prompt, or with parsing.
-        else:
-            test_proofs = []
-            # Count down to non_empty_cutoff + 1 (inclusive)
-            # This boundary is desirable: if even including one nonempty line
-            # renders the code non-compilable, then the response is
-            # "totally wrong".
-            for idx in range(len(response_lines), non_empty_cutoff, -1):
-                if not re.match(lean4_comment_or_blank_line_pattern, response_lines[idx-1]):
-                    # Nothing to check about a comment
-                    test_proofs.append('\n'.join(response_lines[:idx]))
 
-            with mp.Pool() as pool:
-                test_results = pool.map(self.verifier().verify, test_proofs)
+        candidates: List[str] = []
+        # Count down to non_empty_cutoff + 1 (inclusive)
+        # This boundary is desirable: if even including one nonempty line
+        # renders the code non-compilable, then the response is
+        # "totally wrong".
+        for idx in range(len(response_lines), non_empty_cutoff, -1):
+            if not re.match(lean4_comment_or_blank_line_pattern, response_lines[idx-1]):
+                # Nothing to check about a comment
+                candidates.append('\n'.join(response_lines[:idx]))
 
-            accepted_proof : str = None
-            for idx, result in enumerate(test_results):
-                if not any(map(lambda m: m.severity == 'error', result.messages)):
-                    accepted_proof = test_proofs[idx]
-                    break
+        test_proofs = map(
+                lambda seg: imports + str(proof_segment) + '\n' + seg,
+                candidates
+        )
+        with mp.Pool() as pool:
+            test_results = pool.map(self.verifier().verify, test_proofs)
 
-            if accepted_proof is None:
-                # Does not compile at all. Just pass the full response
-                # and the search algorithm will know this attempts fails.
-                accepted_proof = response
+        tactics : str = None
+        for idx, result in enumerate(test_results):
+            if not any(map(lambda m: m.severity == 'error', result.messages)):
+                tactics = candidates[idx]
+                break
 
-        tactics = accepted_proof
-        imports = '\n'.join(re.findall(
-            r'^.*(?<=--\[IMPORT\])(.*?)$',
-            tactics,
-            re.MULTILINE
-        ))
+        if tactics is None:
+            # Does not compile at all. Just pass the full response
+            # and the search algorithm will know this attempts fails.
+            tactics = response
+        if tactics and not tactics.endswith('\n'):
+            tactics += '\n'
 
         ## Some empirical patchwork
         ## The LLM may end the completed part also with "--[END]"
