@@ -6,18 +6,16 @@ import multiprocessing as mp
 from .language import *
 from .verifier import Verifier
 from .lean4_verifier import Lean4Verifier
-from .verifier import VerificationResult
 from llms.prompts import *
 from llms.common import LLMAccess
-from .string_operations import replace_at_indices
+from utils.string_operations import ConcatSafeStr, replace_at_indices
 
 lean4_comment_or_blank_line_pattern = r'^\s*(--.*)?$'
 
 @dataclass(frozen=True)
 class Lean4ProofSegment(ProofSegment):
-    tactics: str
-    imports: str = ""
-    # They are ALWAYS assumed to either be empty or end with '\n'
+    tactics: ConcatSafeStr
+    imports: ConcatSafeStr = ""
 
     @classmethod
     def empty_proof(cls) -> 'Lean4ProofSegment':

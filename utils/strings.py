@@ -1,4 +1,13 @@
-from typing import List, Tuple
+from typing import Any, List, Tuple
+
+class ConcatSafeStr(str):
+    # For a string to be safe to directly concatenate to,
+    # it should either be empty or end with a line break.
+    def __new__(cls, val: Any) -> 'ConcatSafeStr':
+        str_val = str(val)
+        if str_val and not str_val.endswith('\n'):
+            str_val += '\n'
+        return super().new(cls, str_val)
 
 def replace_at_indices(
     s: str,
@@ -19,4 +28,4 @@ def replace_at_indices(
 
     res += s[last_end:]
 
-    return res
+    return res 

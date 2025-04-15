@@ -8,15 +8,14 @@ from .verifier import Verifier
 from .lean3_verifier import Lean3Verifier
 from llms.prompts import *
 from llms.common import LLMAccess
-from .string_operations import replace_at_indices
+from utils.string_operations import ConcatSafeStr, replace_at_indices
 
 lean3_comment_or_blank_line_pattern = r'^\s*(--.*)?$'
 
 @dataclass(frozen=True)
 class Lean3ProofSegment(ProofSegment):
-    tactics: str
-    imports: str = ""
-    # They are ALWAYS assumed to either be empty or end with '\n'
+    tactics: ConcatSafeStr
+    imports: ConcatSafeStr = ""
 
     @classmethod
     def empty_proof(cls) -> 'Lean3ProofSegment':
