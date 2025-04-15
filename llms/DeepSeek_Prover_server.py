@@ -39,5 +39,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str, default='')
     parser.add_argument('--port', type=int, default=DSPROVER_DEFAULT_PORT)
+    parser.add_argument('--tensor-parallel-size', type=int, default=1)
     args = parser.parse_args()
-    DeepSeekProverRPCServer(host = args.host, port = args.port).run()
+    DeepSeekProverRPCServer(
+        tensor_parallal_size = args.tensor_parallal_size,
+        host = args.host,
+        port = args.port
+    ).run()

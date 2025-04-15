@@ -70,9 +70,7 @@ class Lean4Server(VerifierLanguage):
         # Lean 4 refuses to compile empty `by` statements, i.e. one
         # without any tactic in it. And when the statement is not
         # empty, an extra `skip` no-op doesn't break anything.
-        return proof_segment.imports + '\n' +\
-               proof_segment.tactics + '\n' +\
-               indt + 'skip'
+        return proof_segment.imports + proof_segment.tactics + indt + 'skip'
 
     def predict_proof_step(
         self,

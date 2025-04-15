@@ -44,8 +44,7 @@ class Lean3Server(VerifierLanguage):
     verifier: Type[Verifier] = Lean3Verifier
 
     def close_proof(self, proof_segment: Lean3ProofSegment) -> str:
-        proof_str: str = proof_segment.imports + '\n' + proof_segment.tactics
-        proof_str += '\nend'
+        proof_str: str = proof_segment.imports + proof_segment.tactics + 'end'
         return proof_str
 
     @staticmethod
