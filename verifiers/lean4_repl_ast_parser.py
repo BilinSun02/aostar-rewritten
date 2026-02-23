@@ -1,16 +1,61 @@
 # Mostly adapted from the DeepSeek-Prover codebase
 
+# This module post-processes Lean 4 verifier / REPL JSON output (command ASTs, tactics,
+# premises) into Python-friendly dictionaries with extracted source spans (line/column
+# and character offsets) and string slices from the original Lean file.
+
+from __future__ import annotations
+
 import re
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Iterable
+
 line_break_regex = re.compile(r'(?<=\n)')
 
-def process_lean_file(file_contents, byte_idx_1, byte_idx_2):
-    def get_line(lines, line_number):
+# --- Typing helpers -----------------------------------------------------------
+
+JSON = Union[Dict[str, Any], List[Any], str, int, float, bool, None]
+AST = JSON  # Lean 4 AST nodes are represented as JSON-like dict/list structures.
+
+# A (pos, endPos) span as emitted by Lean, typically byte offsets into UTF-8 text.
+ByteSpan = Tuple[Optional[int], Optional[int]]
+
+# A source span in *character* offsets + line/column (1-indexed line/column).
+# We keep it as a tuple when returning from low-level helpers, and project into dicts
+# in higher-level parsers.
+CharSpan = Tuple[
+    Optional[str],  # extracted substring (or None)
+    Optional[int],  # start line
+    Optional[int],  # start column
+    Optional[int],  # end line
+    Optional[int],  # end column
+    Optional[int],  # start char index (0-based)
+    Optional[int],  # end char index (0-based)
+]
+
+def process_lean_file(file_contents: str, byte_idx_1: int, byte_idx_2: int) -> Tuple[str, int, int, int, int, int, int]:
+    """
+    Slice the original Lean source text using **Lean byte offsets** (UTF-8) and return
+    the extracted substring plus (line, column) and (character-index) endpoints.
+
+    Lean's JSON AST uses `pos` / `endPos` as byte offsets into the source file.
+    This helper converts those byte offsets into:
+      - 1-indexed line/column pairs, and
+      - 0-based character indices in the Python `str`.
+
+    Lean example (conceptual):
+    ```lean
+    def add1 (n : Nat) : Nat := n + 1
+    -- Suppose Lean reports pos/endPos covering "n + 1".
+    ```
+    Calling `process_lean_file(file_contents, pos, endPos)` returns the substring
+    `"n + 1"` along with its precise span.
+    """
+    def get_line(lines: Sequence[str], line_number: int) -> str:
         if 1 <= line_number <= len(lines):
             return lines[line_number - 1]
         else:
             raise IndexError("Line number out of range")
-
-    def convert_pos(lines, byte_idx):
+    def convert_pos(lines: Sequence[str], byte_idx: int) -> Tuple[int, int]:
         num_bytes = [len(line.encode('utf-8')) for line in lines]
         n = 0
         for i, num_bytes_in_line in enumerate(num_bytes, start=1):
@@ -28,8 +73,7 @@ def process_lean_file(file_contents, byte_idx_1, byte_idx_2):
                     if m >= line_byte_idx:
                         return i, j + 1
         return len(lines), len(lines[-1])
-
-    def extract_string_between_positions(lines, byte_idx_1, byte_idx_2):
+    def extract_string_between_positions(lines: Sequence[str], byte_idx_1: int, byte_idx_2: int) -> str:
         line_1, column_1 = convert_pos(lines, byte_idx_1)
         line_2, column_2 = convert_pos(lines, byte_idx_2)
 
@@ -47,8 +91,7 @@ def process_lean_file(file_contents, byte_idx_1, byte_idx_2):
             extracted_string.append(lines[line_2 - 1][:column_2 - 1])
 
         return ''.join(extracted_string)
-
-    def convert_line_col_to_char_idx(lines, line, col):
+    def convert_line_col_to_char_idx(lines: Sequence[str], line: int, col: int) -> int:
         char_idx = 0
         for i in range(line - 1):
             char_idx += len(lines[i])
@@ -67,7 +110,18 @@ def process_lean_file(file_contents, byte_idx_1, byte_idx_2):
 
     return extracted_string, line_1, column_1, line_2, column_2, char_idx_1, char_idx_2
 
-def extract_positions(node):
+def extract_positions(node: AST) -> List[ByteSpan]:
+    """
+    Recursively collect all `(pos, endPos)` spans in a Lean AST subtree.
+
+    Lean example (conceptual):
+    ```lean
+    theorem t : True := by trivial
+    ```
+    If `node` is the JSON AST for the theorem command, this returns a list of
+    byte spans for tokens/subnodes inside that command, which higher-level code
+    uses to compute the overall start/end of the declaration.
+    """
     positions = []
     if isinstance(node, dict):
         if 'info' in node and 'original' in node['info']:
@@ -80,7 +134,18 @@ def extract_positions(node):
             positions.extend(extract_positions(item))
     return positions
 
-def extract_vals(data):
+def extract_vals(data: AST) -> List[str]:
+    """
+    Recursively collect and strip all `"val"` fields in a Lean AST subtree.
+
+    Lean example (conceptual):
+    ```lean
+    theorem t (n : Nat) : n = n := by rfl
+    ```
+    On the subtree corresponding to the binder `(n : Nat)`, this returns pieces
+    like `["n", ":", "Nat"]` (exact tokenization depends on Lean), which callers
+    join into a readable snippet.
+    """
     vals = []
     if isinstance(data, dict):
         if "val" in data:
@@ -92,7 +157,20 @@ def extract_vals(data):
             vals.extend(extract_vals(item))
     return vals
 
-def find_doccomment_vals(data):
+def find_doccomment_vals(data: AST) -> Tuple[List[str], List[ByteSpan]]:
+    """
+    Find doc-comment nodes (`Lean.Parser.Command.docComment`) and return:
+      1) the raw doc-comment text fragments (`vals`)
+      2) their `(pos, endPos)` byte spans
+
+    Lean example:
+    ```lean
+    /-- Adds one to a natural number. -/
+    def add1 (n : Nat) : Nat := n + 1
+    ```
+    When given the AST for the `def` command, this returns the doc comment text
+    (the `/-- ... -/` content) and spans covering that comment.
+    """
     vals = []
     positions = []
 
@@ -115,7 +193,16 @@ def find_doccomment_vals(data):
 
     return vals, positions
 
-def find_attributes_vals(data):
+def find_attributes_vals(data: AST) -> Tuple[List[str], List[ByteSpan]]:
+    """
+    Extract attribute syntax (e.g. `@[simp]`) from a declaration AST.
+
+    Lean example:
+    ```lean
+    @[simp] theorem t (n : Nat) : n = n := by rfl
+    ```
+    Returns tokens/spans covering `@[simp]`.
+    """
     vals = []
     positions = []
 
@@ -137,7 +224,16 @@ def find_attributes_vals(data):
 
     return vals, positions
 
-def find_pripro_vals(data):
+def find_pripro_vals(data: AST) -> Tuple[List[str], List[ByteSpan]]:
+    """
+    Extract `private` / `protected` modifiers from a declaration AST.
+
+    Lean example:
+    ```lean
+    private theorem secret : True := by trivial
+    ```
+    Returns tokens/spans covering the `private` keyword.
+    """
     vals = []
     positions = []
 
@@ -159,7 +255,17 @@ def find_pripro_vals(data):
 
     return vals, positions
 
-def extract_other_vals(data):
+def extract_other_vals(data: AST) -> List[str]:
+    """
+    Like `extract_vals`, but preserves `"val"` exactly (no `.strip()`).
+
+    Lean example (conceptual):
+    ```lean
+    theorem t : True := by trivial
+    ```
+    Useful when you care about exact token text (including whitespace) as emitted
+    in the AST.
+    """
     vals = []
     if isinstance(data, dict):
         if "val" in data:
@@ -171,7 +277,22 @@ def extract_other_vals(data):
             vals.extend(extract_other_vals(item))
     return vals
 
-def find_kind_name_theorem_lemma_abbrev_def_instance_inductive(file_content, data):
+def find_kind_name_theorem_lemma_abbrev_def_instance_inductive(file_content: str, data: AST) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """
+    From a declaration command AST, extract the *kind* keyword and declared *name*.
+
+    Supported kinds include: `theorem`, `lemma`, `abbrev`, `def`, `instance`, `inductive`.
+
+    Lean examples:
+    ```lean
+    theorem T : True := by trivial
+    def f (n : Nat) := n + 1
+    instance : Inhabited Nat := ⟨0⟩
+    inductive MyNat | zero | succ (n : MyNat)
+    ```
+    For `theorem T ...`, returns kind `"theorem"` and name `"T"` plus spans.
+    For anonymous `instance : ...`, `name` may be `None` depending on syntax.
+    """
     kind = None
     name = None
     kind_pos = None
@@ -222,7 +343,20 @@ def find_kind_name_theorem_lemma_abbrev_def_instance_inductive(file_content, dat
         name, name_line_1, name_column_1, name_line_2, name_column_2, name_char_idx_1, name_char_idx_2 = None,None,None, None,None,None,None
     return kind, kind_line_1, kind_column_1, kind_line_2, kind_column_2, kind_char_idx_1, kind_char_idx_2, name, name_line_1, name_column_1, name_line_2, name_column_2, name_char_idx_1, name_char_idx_2
 
-def find_statement_theorem_lemma_abbrev(file_content,data):
+def find_statement_theorem_lemma_abbrev(file_content: str, data: AST) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[ByteSpan]]:
+    """
+    Extract binders/parameters and type-spec (the `: ...`) for theorems/lemmas/abbrevs.
+
+    Lean example:
+    ```lean
+    theorem add_comm (a b : Nat) : a + b = b + a := by
+      simpa [Nat.add_comm]
+    ```
+    Returns:
+      - `parameters`: spans for `(a b : Nat)`
+      - `Type`: span for `: a + b = b + a`
+      - `statement_positions`: all byte spans inside the signature node.
+    """
     explicitBinder_list = []
     type_list=[]
     second_node=data["node"]["args"][1]["node"]
@@ -285,7 +419,17 @@ def find_statement_theorem_lemma_abbrev(file_content,data):
     # print(explicitBinder_list,statement_positions)
     return explicitBinder_list, type_list, statement_positions
 
-def find_proof(file_content, data):
+def find_proof(file_content: str, data: AST) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """
+    Extract the proof/value part of a declaration (`:= ...` or `where ...` forms
+    represented by `declValSimple` / `declValEqns`).
+
+    Lean example:
+    ```lean
+    theorem t : True := by trivial
+    ```
+    Returns the substring for `:= by trivial` (or the equivalent proof node) and spans.
+    """
     vals = []
     positions = []
     if isinstance(data, dict):
@@ -307,7 +451,24 @@ def find_proof(file_content, data):
 
     return proof, proof_line_1, proof_column_1, proof_line_2, proof_column_2, proof_char_idx_1, proof_char_idx_2
 
-def process_modifier(file_content, declaration, tactics):
+def process_modifier(file_content: str, declaration: AST, tactics: Optional[List[Dict[str, Any]]]) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """
+    Given a declaration AST, extract common "modifier" components:
+      - doc comment
+      - attributes (`@[...]`)
+      - `private` / `protected`
+      - the full declaration span
+      - and tactics that lie within the declaration span (if provided)
+
+    Lean example:
+    ```lean
+    /-- doc -/
+    @[simp] private theorem t : True := by
+      trivial
+    ```
+    Returns the spans for the doc comment, `@[simp]`, `private`, the whole command,
+    plus any tactic spans that fall inside the command.
+    """
     doccomment_vals, doccomment_positions = find_doccomment_vals(declaration)
     if doccomment_vals:
         comment_start_pos = min(pos[0] for pos in doccomment_positions)
@@ -358,7 +519,24 @@ def process_modifier(file_content, declaration, tactics):
 
     return tactics_list, comment, comment_line_1, comment_column_1, comment_line_2, comment_column_2, comment_char_idx_1, comment_char_idx_2, attributes, attributes_line_1, attributes_column_1, attributes_line_2, attributes_column_2, attributes_char_idx_1, attributes_char_idx_2, pripro, pripro_line_1, pripro_column_1, pripro_line_2, pripro_column_2, pripro_char_idx_1, pripro_char_idx_2, whole, whole_line_1, whole_column_1, whole_line_2, whole_column_2, whole_char_idx_1, whole_char_idx_2
 
-def theorem_lemma_abbrev(file_content, declaration,tactics):
+def theorem_lemma_abbrev(file_content: str, declaration: AST, tactics: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """
+    Parse a theorem/lemma/example/abbrev declaration into a Python-friendly dict.
+
+    Lean example:
+    ```lean
+    @[simp] theorem t (n : Nat) : n = n := by
+      rfl
+    ```
+    Produces a dict containing:
+      - `kind`: "theorem"
+      - `name`: "t" + span
+      - `parameters`: binder spans
+      - `Type`: type-spec span
+      - `statement`: full signature span
+      - `proof`: proof span
+      - plus comment/attributes/private-protected/whole spans.
+    """
     tactics_list, comment, comment_line_1, comment_column_1, comment_line_2, comment_column_2, comment_char_idx_1, comment_char_idx_2, attributes, attributes_line_1, attributes_column_1, attributes_line_2, attributes_column_2, attributes_char_idx_1, attributes_char_idx_2, pripro, pripro_line_1, pripro_column_1, pripro_line_2, pripro_column_2, pripro_char_idx_1, pripro_char_idx_2, whole, whole_line_1, whole_column_1, whole_line_2, whole_column_2, whole_char_idx_1, whole_char_idx_2= process_modifier(file_content, declaration,tactics)
 
     kind, kind_line_1, kind_column_1, kind_line_2, kind_column_2, kind_char_idx_1, kind_char_idx_2,name, name_line_1, name_column_1, name_line_2, name_column_2, name_char_idx_1, name_char_idx_2  = find_kind_name_theorem_lemma_abbrev_def_instance_inductive(file_content, declaration)
@@ -454,7 +632,18 @@ def theorem_lemma_abbrev(file_content, declaration,tactics):
     }
     return declaration_info
 
-def find_statement_def(file_content,data):
+def find_statement_def(file_content: str, data: AST) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[ByteSpan]]:
+    """
+    Extract binders/parameters and type-spec for `def` / `instance` declarations.
+
+    Lean examples:
+    ```lean
+    def add1 (n : Nat) : Nat := n + 1
+    instance : Inhabited Nat := ⟨0⟩
+    ```
+    For `def add1 ...`, returns binder spans `(n : Nat)` and type-spec `: Nat`.
+    For an `instance`, treats the post-`:` type as the type-spec.
+    """
     explicitBinder_list = []
     type_list=[]
     second_node=data["node"]["args"][1]["node"]
@@ -541,7 +730,17 @@ def find_statement_def(file_content,data):
             })
     return explicitBinder_list,type_list, statement_positions
 
-def definition_instance(file_content, declaration,tactics):
+def definition_instance(file_content: str, declaration: AST, tactics: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """
+    Parse a `def` or `instance` declaration into a Python-friendly dict.
+
+    Lean example:
+    ```lean
+    def add1 (n : Nat) : Nat := n + 1
+    ```
+    Produces a dict with the same overall shape as `theorem_lemma_abbrev`, but with
+    `kind` "def"/"instance" and the appropriate signature/proof extraction.
+    """
     tactics_list, comment, comment_line_1, comment_column_1, comment_line_2, comment_column_2, comment_char_idx_1, comment_char_idx_2, attributes, attributes_line_1, attributes_column_1, attributes_line_2, attributes_column_2, attributes_char_idx_1, attributes_char_idx_2, pripro, pripro_line_1, pripro_column_1, pripro_line_2, pripro_column_2, pripro_char_idx_1, pripro_char_idx_2, whole, whole_line_1, whole_column_1, whole_line_2, whole_column_2, whole_char_idx_1, whole_char_idx_2= process_modifier(file_content, declaration,tactics)
 
     kind, kind_line_1, kind_column_1, kind_line_2, kind_column_2, kind_char_idx_1, kind_char_idx_2,name, name_line_1, name_column_1, name_line_2, name_column_2, name_char_idx_1, name_char_idx_2  = find_kind_name_theorem_lemma_abbrev_def_instance_inductive(file_content, declaration)
@@ -638,7 +837,18 @@ def definition_instance(file_content, declaration,tactics):
     }
     return declaration_info
 
-def find_kind_name_structure(file_content, data):
+def find_kind_name_structure(file_content: str, data: AST) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """
+    Extract kind/name for a `structure` declaration.
+
+    Lean example:
+    ```lean
+    structure Point where
+      x : Nat
+      y : Nat
+    ```
+    Returns kind `"structure"` and name `"Point"` plus spans.
+    """
     kind = None
     name = None
     kind_pos = None
@@ -677,7 +887,17 @@ def find_kind_name_structure(file_content, data):
         name, name_line_1, name_column_1, name_line_2, name_column_2, name_char_idx_1, name_char_idx_2 = None,None,None, None,None,None,None
     return kind, kind_line_1, kind_column_1, kind_line_2, kind_column_2, kind_char_idx_1, kind_char_idx_2, name, name_line_1, name_column_1, name_line_2, name_column_2, name_char_idx_1, name_char_idx_2
 
-def find_statement_structure(file_content,data):
+def find_statement_structure(file_content: str, data: AST) -> Tuple[List[Dict[str, Any]], Optional[List[ByteSpan]]]:
+    """
+    Extract binder-like parameters appearing in a `structure` header.
+
+    Lean example:
+    ```lean
+    structure Wrap (α : Type) where
+      val : α
+    ```
+    Returns spans for `(α : Type)` and overall header positions when available.
+    """
     explicitBinder_list = []
     second_node=data["node"]["args"][1]["node"]
     statement_positions=None
@@ -717,7 +937,18 @@ def find_statement_structure(file_content,data):
 
     return explicitBinder_list, statement_positions
 
-def find_proof_structure(file_content, declaration):
+def find_proof_structure(file_content: str, declaration: AST) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """
+    Extract the `where ...` block from a `structure` declaration, if present.
+
+    Lean example:
+    ```lean
+    structure Point where
+      x : Nat
+      y : Nat
+    ```
+    Returns the substring starting at `where` through the end of the fields block.
+    """
     vals = []
     positions = []
     second_node=declaration["node"]["args"][1]["node"]
@@ -741,7 +972,18 @@ def find_proof_structure(file_content, declaration):
 
     return proof, proof_line_1, proof_column_1, proof_line_2, proof_column_2, proof_char_idx_1, proof_char_idx_2
 
-def structure(file_content, declaration,tactics):
+def structure(file_content: str, declaration: AST, tactics: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """
+    Parse a `structure` declaration into a Python-friendly dict.
+
+    Lean example:
+    ```lean
+    structure Wrap (α : Type) where
+      val : α
+    ```
+    Produces a dict containing kind/name, parameters, statement span, and the `where`
+    block as the "proof" field (mirroring other declaration parsers).
+    """
     tactics_list, comment, comment_line_1, comment_column_1, comment_line_2, comment_column_2, comment_char_idx_1, comment_char_idx_2, attributes, attributes_line_1, attributes_column_1, attributes_line_2, attributes_column_2, attributes_char_idx_1, attributes_char_idx_2, pripro, pripro_line_1, pripro_column_1, pripro_line_2, pripro_column_2, pripro_char_idx_1, pripro_char_idx_2, whole, whole_line_1, whole_column_1, whole_line_2, whole_column_2, whole_char_idx_1, whole_char_idx_2= process_modifier(file_content, declaration,tactics)
 
     kind, kind_line_1, kind_column_1, kind_line_2, kind_column_2, kind_char_idx_1, kind_char_idx_2,name, name_line_1, name_column_1, name_line_2, name_column_2, name_char_idx_1, name_char_idx_2  = find_kind_name_structure(file_content, declaration)
@@ -851,7 +1093,18 @@ def structure(file_content, declaration,tactics):
     }
     return declaration_info
 
-def find_proof_inductive(file_content, declaration):
+def find_proof_inductive(file_content: str, declaration: AST) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """
+    Extract constructor blocks (`| ...`) from an `inductive` declaration.
+
+    Lean example:
+    ```lean
+    inductive MyNat where
+      | zero : MyNat
+      | succ : MyNat → MyNat
+    ```
+    Returns the substring covering the first constructor node encountered and spans.
+    """
     vals = []
     positions = []
     second_node=declaration["node"]["args"][1]["node"]
@@ -872,7 +1125,19 @@ def find_proof_inductive(file_content, declaration):
         proof, proof_line_1, proof_column_1, proof_line_2, proof_column_2, proof_char_idx_1, proof_char_idx_2 = None,None,None, None,None,None, None
     return proof, proof_line_1, proof_column_1, proof_line_2, proof_column_2, proof_char_idx_1, proof_char_idx_2
 
-def inductive(file_content, declaration,tactics):
+def inductive(file_content: str, declaration: AST, tactics: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """
+    Parse an `inductive` declaration into a Python-friendly dict.
+
+    Lean example:
+    ```lean
+    inductive MyNat where
+      | zero : MyNat
+      | succ : MyNat → MyNat
+    ```
+    Produces a dict with kind/name, parameters/type (if any), statement span, and
+    constructors captured as the "proof" field.
+    """
     tactics_list, comment, comment_line_1, comment_column_1, comment_line_2, comment_column_2, comment_char_idx_1, comment_char_idx_2, attributes, attributes_line_1, attributes_column_1, attributes_line_2, attributes_column_2, attributes_char_idx_1, attributes_char_idx_2, pripro, pripro_line_1, pripro_column_1, pripro_line_2, pripro_column_2, pripro_char_idx_1, pripro_char_idx_2, whole, whole_line_1, whole_column_1, whole_line_2, whole_column_2, whole_char_idx_1, whole_char_idx_2= process_modifier(file_content, declaration,tactics)
 
     kind, kind_line_1, kind_column_1, kind_line_2, kind_column_2, kind_char_idx_1, kind_char_idx_2,name, name_line_1, name_column_1, name_line_2, name_column_2, name_char_idx_1, name_char_idx_2  = find_kind_name_theorem_lemma_abbrev_def_instance_inductive(file_content, declaration)
@@ -974,7 +1239,26 @@ def inductive(file_content, declaration,tactics):
     }
     return declaration_info
 
-def lean4_parser(file_content, data):
+def lean4_parser(file_content: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Entry point: convert Lean REPL/verifier JSON output into a structured dict.
+
+    Expected `data` keys:
+      - `"tactics"`: list of tactic spans (byte offsets) emitted by the verifier
+      - `"premises"`: dependency/premise info (passed through)
+      - `"commandASTs"`: list of command ASTs for the file
+
+    Lean example file:
+    ```lean
+    /-- doc -/
+    @[simp] theorem t (n : Nat) : n = n := by rfl
+    def add1 (n : Nat) : Nat := n + 1
+    structure Wrap (α : Type) where val : α
+    inductive MyNat | zero | succ (n : MyNat)
+    ```
+    Returns a dict with `declarations` containing one parsed entry per command AST,
+    each annotated with extracted substrings and precise spans.
+    """
     tactics = data.get("tactics")
     premises = data.get("premises")
     command_asts = data.get("commandASTs")
